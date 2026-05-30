@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+results/*.npz
+results/*.tsv
+results/*.log
+
+.DS_Store

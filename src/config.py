@@ -10,4 +10,7 @@ CLIP_LEN = 64600
 # README default; model.py classify() uses -1.0625009 internally
 DEFAULT_THRESHOLD = -1.460938
 
+DEFAULT_FAST_MODEL = RESULTS_DIR / "fast_baseline_mfcc_rbf_svc_demo.joblib"
+DEFAULT_FAST_PROFILE_PATH = RESULTS_DIR / "fast_demo_feature_profiles.json"
+
 PREPROCESS_MODES = ("deterministic", "random")

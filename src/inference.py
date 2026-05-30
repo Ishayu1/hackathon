@@ -11,7 +11,7 @@ import torch
 import torch.nn.functional as F
 
 from src.audio_preprocess import PreprocessMode, decode_audio_bytes, prepare_batch, prepare_waveform
-from src.config import CLIP_LEN, DEFAULT_THRESHOLD
+from src.config import CLIP_LEN, DEFAULT_FAST_MODEL, DEFAULT_THRESHOLD
 from src.fast_baseline import FastAudioClassifier, prepare_waveform_fast
 from src.model_loader import load_model, warmup
 from vendor.spectra_aasist3.model import SpectraAASIST3
@@ -170,7 +170,7 @@ def initialize_inference_context(
 ) -> InferenceContext:
     """Initialize either Spectra-AASIST3 or fast baseline backend."""
     if backend == "fast":
-        model_path = Path(fast_model_path or "results/fast_baseline_mfcc_logistic_regression.joblib")
+        model_path = Path(fast_model_path or DEFAULT_FAST_MODEL)
         model = FastAudioClassifier.load(model_path)
         return InferenceContext(backend="fast", model=model, device="cpu")
 

@@ -72,12 +72,20 @@ Use fast baseline:
 
 ```bash
 MODEL_BACKEND=fast \
-FAST_MODEL_PATH=results/fast_baseline_mfcc_logistic_regression.joblib \
+FAST_MODEL_PATH=results/fast_baseline_mfcc_rbf_svc_demo.joblib \
 uvicorn api.main:app --host 0.0.0.0 --port 8000
 ```
 
 ```bash
 curl -X POST http://localhost:8000/classify -F "file=@sample.wav"
+```
+
+## Fast Baseline Explainability
+
+For `MODEL_BACKEND=fast`, `/classify` includes an `explanation` object generated from the same 88 MFCC/LFCC and spectral features used by the classifier. The method compares the uploaded clip's feature values with bonafide and spoof class profiles computed from the Gary Stafford demo train split only (`scripts/build_feature_profiles.py`). Top signals are ranked by which class profile they are closer to and are phrased as corpus similarity, not causal proof. Spectra/Wav2Vec2 responses return `explanation: null`; MFCC explanations are not claimed for that backend. Rebuild profiles with:
+
+```bash
+python scripts/build_feature_profiles.py
 ```
 
 ## Go / no-go criteria

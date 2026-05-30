@@ -16,13 +16,13 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
-from sklearn.svm import LinearSVC
+from sklearn.svm import LinearSVC, SVC
 
 from src.audio_preprocess import resample_if_needed, to_mono
 from src.config import SAMPLE_RATE
 
 FastFeatureType = Literal["mfcc", "lfcc"]
-FastModelType = Literal["logistic_regression", "random_forest", "linear_svc"]
+FastModelType = Literal["logistic_regression", "random_forest", "linear_svc", "rbf_svc"]
 FastLabel = Literal["bonafide", "spoof"]
 FAST_CLIP_SECONDS = 4
 FAST_CLIP_LEN = SAMPLE_RATE * FAST_CLIP_SECONDS
@@ -58,6 +58,50 @@ def prepare_waveform_fast(waveform: torch.Tensor, sample_rate: int) -> np.ndarra
     else:
         x = np.pad(x, (0, FAST_CLIP_LEN - x.shape[0]))
     return x.astype(np.float32, copy=False)
+
+
+def fast_feature_names(feature_type: FastFeatureType = "mfcc", n_coeffs: int = 20) -> list[str]:
+    """Return stable names matching FastAudioClassifier.extract_features order."""
+    prefix = "mfcc" if feature_type == "mfcc" else "lfcc"
+    names: list[str] = []
+    names.extend(f"{prefix}_{i}_mean" for i in range(n_coeffs))
+    names.extend(f"{prefix}_{i}_std" for i in range(n_coeffs))
+    names.extend(f"delta_{i}_mean" for i in range(n_coeffs))
+    names.extend(f"delta_{i}_std" for i in range(n_coeffs))
+    names.extend(
+        [
+            "spectral_centroid_mean",
+            "spectral_centroid_std",
+            "spectral_rolloff_mean",
+            "spectral_rolloff_std",
+            "zero_crossing_rate_mean",
+            "zero_crossing_rate_std",
+            "rms_mean",
+            "rms_std",
+        ]
+    )
+    return names
+
+
+def fast_feature_label(name: str) -> str:
+    labels = {
+        "spectral_centroid_mean": "Average spectral centroid",
+        "spectral_centroid_std": "Spectral centroid variation",
+        "spectral_rolloff_mean": "Average spectral rolloff",
+        "spectral_rolloff_std": "Spectral rolloff variation",
+        "zero_crossing_rate_mean": "Average zero-crossing rate",
+        "zero_crossing_rate_std": "Zero-crossing variation",
+        "rms_mean": "Average signal energy",
+        "rms_std": "Signal energy variation",
+    }
+    if name in labels:
+        return labels[name]
+    parts = name.split("_")
+    if len(parts) >= 3 and parts[0] in {"mfcc", "lfcc"}:
+        return f"{parts[0].upper()} coefficient {parts[1]} {parts[2]}"
+    if len(parts) >= 3 and parts[0] == "delta":
+        return f"MFCC delta coefficient {parts[1]} {parts[2]}"
+    return name.replace("_", " ")
 
 
 class FastAudioClassifier:
@@ -98,6 +142,22 @@ class FastAudioClassifier:
                 [
                     ("scaler", StandardScaler()),
                     ("clf", LinearSVC(random_state=42)),
+                ]
+            )
+        if self.model_type == "rbf_svc":
+            return Pipeline(
+                [
+                    ("scaler", StandardScaler()),
+                    (
+                        "clf",
+                        SVC(
+                            kernel="rbf",
+                            C=1.0,
+                            gamma="scale",
+                            probability=True,
+                            random_state=42,
+                        ),
+                    ),
                 ]
             )
         raise ValueError(f"Unsupported model_type: {self.model_type}")

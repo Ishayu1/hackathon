@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import {
   AlertTriangle,
@@ -26,6 +26,7 @@ const intercepts = [
     authenticity: 'Likely Real',
     confidence: 0.18,
     latency: 112,
+    source: 'sample',
     risk: 'LOW',
     intent: 'Routine logistics update',
     transcript:
@@ -41,6 +42,7 @@ const intercepts = [
     authenticity: 'Likely Synthetic',
     confidence: 0.91,
     latency: 184,
+    source: 'sample',
     risk: 'CRITICAL',
     intent: 'Movement order / logistics reroute',
     transcript:
@@ -57,6 +59,7 @@ const intercepts = [
     authenticity: 'Uncertain',
     confidence: 0.62,
     latency: 156,
+    source: 'sample',
     risk: 'HIGH',
     intent: 'Threat warning',
     transcript:
@@ -94,7 +97,7 @@ function RiskPill({ risk }) {
   return <span className={`risk-pill risk-${risk.toLowerCase()}`}>{risk}</span>;
 }
 
-function Waveform({ chunks }) {
+function Waveform({ chunks, illustrative = false }) {
   const bars = useMemo(
     () =>
       Array.from({ length: 56 }, (_, i) => {
@@ -110,8 +113,8 @@ function Waveform({ chunks }) {
     <div className="wave-wrap">
       <div className="wave-topline" />
       <div className="wave-meta">
-        <span>Audio signal scan</span>
-        <span>4s windows · 1s overlap</span>
+        <span>{illustrative ? 'Sample scenario (illustrative)' : 'Audio signal scan'}</span>
+        <span>{illustrative ? 'not model output' : '4s windows · 1s overlap'}</span>
       </div>
       <div className="wave-bars">
         {bars.map((h, i) => {
@@ -140,6 +143,85 @@ function Waveform({ chunks }) {
   );
 }
 
+function AcousticRationale({ explanation }) {
+  if (!explanation) {
+    return (
+      <div className="mini-card">
+        <div className="mini-title">
+          <BrainCircuit size={16} /> Acoustic Rationale
+        </div>
+        <p className="small-note">Interpretability available for fast MFCC model only.</p>
+      </div>
+    );
+  }
+
+  if (!explanation.top_signals?.length) {
+    return (
+      <div className="mini-card">
+        <div className="mini-title">
+          <BrainCircuit size={16} /> Acoustic Rationale
+        </div>
+        <p className="small-note">{explanation.note || 'No grounded feature signals were returned.'}</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mini-card rationale-card">
+      <div className="mini-title">
+        <BrainCircuit size={16} /> Acoustic Rationale
+      </div>
+      <div className="rationale-method">{explanation.method}</div>
+      <div className="signal-list">
+        {explanation.top_signals.map((signal) => (
+          <div key={signal.name} className="signal-row">
+            <div>
+              <div className="signal-name">{signal.label || signal.name}</div>
+              <div className="signal-copy">{signal.plain_text}</div>
+            </div>
+            <div className="signal-value">{signal.value}</div>
+          </div>
+        ))}
+      </div>
+      <p className="small-note disclaimer">{explanation.disclaimer}</p>
+    </div>
+  );
+}
+
+function mapClassifyResponse(payload, filename) {
+  const spoofScore =
+    typeof payload.score_spoof === 'number'
+      ? payload.score_spoof
+      : payload.is_spoof
+        ? payload.confidence
+        : 1 - payload.confidence;
+  const modelConfidence =
+    typeof payload.confidence === 'number'
+      ? payload.confidence
+      : Math.max(spoofScore, 1 - spoofScore);
+  const isSpoof = payload.label === 'spoof' || payload.is_spoof;
+  return {
+    id: `upload-${Date.now()}`,
+    title: filename || payload.filename || 'Uploaded Audio',
+    subtitle: `${payload.backend || 'fast'} backend`,
+    authenticity: isSpoof ? 'Likely Synthetic' : 'Likely Real',
+    confidence: spoofScore,
+    modelConfidence,
+    syntheticScore: spoofScore,
+    latency: Math.round(payload.total_ms || 0),
+    risk: isSpoof ? 'HIGH' : 'LOW',
+    intent: 'Audio authenticity check',
+    transcript: 'Uploaded audio; transcript extraction is not part of this classifier.',
+    recommendation: isSpoof
+      ? 'Verify through a secondary channel before acting on this audio.'
+      : 'Classifier output is consistent with authentic training examples; continue normal verification for operational use.',
+    watch: [],
+    source: 'upload',
+    backend: payload.backend,
+    explanation: payload.explanation
+  };
+}
+
 function MetricCard({ icon: Icon, label, value, sub }) {
   return (
     <Card>
@@ -158,16 +240,48 @@ function MetricCard({ icon: Icon, label, value, sub }) {
 
 export default function App() {
   const [active, setActive] = useState(intercepts[1]);
+  const [uploadResult, setUploadResult] = useState(null);
+  const [uploadError, setUploadError] = useState('');
+  const [uploading, setUploading] = useState(false);
   const [mission, setMission] = useState(missionProfiles[0]);
   const [watchlist, setWatchlist] = useState('Convoy Alpha, Checkpoint Delta, Fuel Depot, Sector 7');
   const [operatorDecision, setOperatorDecision] = useState('Escalate');
+  const fileInputRef = useRef(null);
 
-  const fakeScore = Math.round(active.confidence * 100);
+  const fakeScore = Math.round((active.syntheticScore ?? active.confidence) * 100);
   const authenticityScore =
-    active.authenticity === 'Likely Real' ? Math.round((1 - active.confidence) * 100) : fakeScore;
+    active.authenticity === 'Likely Real'
+      ? Math.round(((active.modelConfidence ?? 1 - active.confidence)) * 100)
+      : Math.round(((active.modelConfidence ?? active.confidence)) * 100);
 
   const systemRecommendation =
     active.risk === 'LOW' ? 'TRUST' : active.risk === 'HIGH' ? 'VERIFY' : 'ESCALATE';
+
+  async function handleFileUpload(event) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    setUploadError('');
+    try {
+      const form = new FormData();
+      form.append('file', file);
+      const apiBase = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+      const response = await fetch(`${apiBase}/classify`, { method: 'POST', body: form });
+      if (!response.ok) {
+        const message = await response.text();
+        throw new Error(message || `Upload failed with status ${response.status}`);
+      }
+      const payload = await response.json();
+      const mapped = mapClassifyResponse(payload, file.name);
+      setUploadResult(mapped);
+      setActive(mapped);
+    } catch (error) {
+      setUploadError(error.message || 'Upload failed');
+    } finally {
+      setUploading(false);
+      event.target.value = '';
+    }
+  }
 
   return (
     <div className="app-root">
@@ -194,8 +308,15 @@ export default function App() {
             </p>
           </div>
           <div className="hero-actions">
-            <Button>
-              <Upload size={16} /> Upload Audio
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="audio/*,.flac,.wav,.mp3,.m4a"
+              hidden
+              onChange={handleFileUpload}
+            />
+            <Button onClick={() => fileInputRef.current?.click()} disabled={uploading}>
+              <Upload size={16} /> {uploading ? 'Classifying...' : 'Upload Audio'}
             </Button>
             <Button variant="outline">
               <Sparkles size={16} /> Generate Brief
@@ -237,10 +358,25 @@ export default function App() {
                 <h2>Sample Intercepts</h2>
               </div>
               <div className="stack">
+                {uploadResult && (
+                  <button
+                    onClick={() => setActive(uploadResult)}
+                    className={`choice-btn intercept ${active.id === uploadResult.id ? 'active-fuchsia' : ''}`}
+                  >
+                    <div>
+                      <div className="intercept-title">Latest Upload</div>
+                      <div className="intercept-sub">{uploadResult.title}</div>
+                    </div>
+                    <FileAudio size={18} />
+                  </button>
+                )}
                 {intercepts.map((item) => (
                   <button
                     key={item.id}
-                    onClick={() => setActive(item)}
+                    onClick={() => {
+                      setActive(item);
+                      setUploadError('');
+                    }}
                     className={`choice-btn intercept ${active.id === item.id ? 'active-fuchsia' : ''}`}
                   >
                     <div>
@@ -251,6 +387,7 @@ export default function App() {
                   </button>
                 ))}
               </div>
+              {uploadError && <p className="small-note upload-error">{uploadError}</p>}
             </Card>
           </aside>
 
@@ -285,7 +422,11 @@ export default function App() {
 
               <div className="analysis-grid">
                 <div className="left-stack">
-                  <Waveform chunks={active.chunks} />
+                  {active.source === 'upload' ? (
+                    <AcousticRationale explanation={active.explanation} />
+                  ) : (
+                    <Waveform chunks={active.chunks} illustrative />
+                  )}
 
                   <div className="two-col">
                     <div className="mini-card">
@@ -327,6 +468,7 @@ export default function App() {
                   <div className="mini-card">
                     <div className="label">Watchlist Matches</div>
                     <div className="chips">
+                      {active.watch.length === 0 && <span className="chip muted-chip">No extracted matches</span>}
                       {active.watch.map((term) => (
                         <span key={term} className="chip">
                           {term}
