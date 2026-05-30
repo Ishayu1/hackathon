@@ -29,11 +29,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--eval-split", default="validation", choices=["validation", "test", "train"])
     parser.add_argument("--max-train-samples", type=int, default=8000)
     parser.add_argument("--max-eval-samples", type=int, default=3000)
+    parser.add_argument(
+        "--full",
+        action="store_true",
+        help="Use entire train/eval splits (ignores max-*-samples)",
+    )
     parser.add_argument("--feature-type", default="mfcc", choices=["mfcc", "lfcc"])
     parser.add_argument(
         "--model-type",
-        default="logistic_regression",
-        choices=["logistic_regression", "random_forest", "linear_svc"],
+        default="rbf_svc",
+        choices=["logistic_regression", "random_forest", "linear_svc", "rbf_svc"],
     )
     parser.add_argument(
         "--threshold",
@@ -46,10 +51,16 @@ def parse_args() -> argparse.Namespace:
 
 
 def label_is_bonafide(key) -> int:
+    """Return 1 for bonafide, 0 for spoof. HF dataset uses 0=bonafide, 1=spoof."""
     if isinstance(key, str):
-        return 1 if key.strip().lower() == "bonafide" else 0
+        k = key.strip().lower()
+        if k in ("bonafide", "real", "0"):
+            return 1
+        if k in ("spoof", "fake", "1"):
+            return 0
+        raise ValueError(f"Unknown label string: {key!r}")
     if isinstance(key, (int, np.integer)):
-        return 1 if int(key) == 1 else 0
+        return 1 if int(key) == 0 else 0
     raise ValueError(f"Unsupported label format: {type(key)}")
 
 
@@ -69,24 +80,61 @@ def row_to_prepared(row: dict) -> np.ndarray:
     return prepare_waveform_fast(waveform, sr)
 
 
-def build_features(dataset, max_samples: int | None, clf: FastAudioClassifier):
-    n_total = len(dataset) if max_samples is None else min(len(dataset), max_samples)
+def stratified_indices(labels: np.ndarray, max_samples: int, seed: int = 42) -> np.ndarray:
+    """Pick a balanced-ish subset covering both bonafide (0) and spoof (1)."""
+    rng = np.random.default_rng(seed)
+    labels = np.asarray(labels)
+    idx = np.arange(labels.shape[0])
+    bonafide_idx = idx[labels == 0]
+    spoof_idx = idx[labels == 1]
+    if bonafide_idx.size == 0 or spoof_idx.size == 0:
+        return idx[:max_samples]
+
+    ratio_bonafide = bonafide_idx.size / labels.size
+    n_bonafide = min(bonafide_idx.size, max(1, int(round(max_samples * ratio_bonafide))))
+    n_spoof = min(spoof_idx.size, max_samples - n_bonafide)
+    if n_bonafide + n_spoof < max_samples:
+        n_bonafide = min(bonafide_idx.size, max_samples - n_spoof)
+
+    chosen = np.concatenate(
+        [
+            rng.choice(bonafide_idx, n_bonafide, replace=False),
+            rng.choice(spoof_idx, n_spoof, replace=False),
+        ]
+    )
+    rng.shuffle(chosen)
+    return chosen
+
+
+def build_features(dataset, max_samples: int | None, clf: FastAudioClassifier, *, stratified: bool = True):
+    n_ds = len(dataset)
+    if max_samples is None or max_samples >= n_ds:
+        indices = np.arange(n_ds)
+    elif stratified:
+        all_labels = np.asarray([label_is_bonafide(dataset[i]["key"]) for i in range(n_ds)])
+        # label_is_bonafide returns 1=bonafide; map back to 0/1 key space for stratify
+        key_labels = np.where(all_labels == 1, 0, 1)
+        indices = stratified_indices(key_labels, max_samples)
+    else:
+        indices = np.arange(min(len(dataset), max_samples))
+
+    n_total = len(indices)
     x_rows: list[np.ndarray] = []
     y_rows: list[int] = []
     feature_ms: list[float] = []
     t_start = time.perf_counter()
-    for idx in range(n_total):
-        row = dataset[idx]
+    for j, idx in enumerate(indices):
+        row = dataset[int(idx)]
         prepared = row_to_prepared(row)
         t0 = time.perf_counter()
         feats = clf.extract_features(prepared)
         feature_ms.append((time.perf_counter() - t0) * 1000.0)
         x_rows.append(feats)
         y_rows.append(label_is_bonafide(row["key"]))
-        if (idx + 1) % 500 == 0 or idx + 1 == n_total:
+        if (j + 1) % 500 == 0 or j + 1 == n_total:
             elapsed = time.perf_counter() - t_start
-            rate = (idx + 1) / elapsed if elapsed > 0 else 0.0
-            print(f"  features {idx + 1}/{n_total} ({rate:.1f} samples/s)")
+            rate = (j + 1) / elapsed if elapsed > 0 else 0.0
+            print(f"  features {j + 1}/{n_total} ({rate:.1f} samples/s)")
     x = np.asarray(x_rows, dtype=np.float32)
     y = np.asarray(y_rows, dtype=np.int64)
     return x, y, feature_ms
@@ -94,6 +142,10 @@ def build_features(dataset, max_samples: int | None, clf: FastAudioClassifier):
 
 def main() -> None:
     args = parse_args()
+    if args.full:
+        args.max_train_samples = None
+        args.max_eval_samples = None
+
     output_dir = args.output_dir
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -188,4 +240,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-import io

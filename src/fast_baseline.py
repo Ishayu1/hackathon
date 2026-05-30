@@ -23,6 +23,8 @@ from src.config import SAMPLE_RATE
 
 FastFeatureType = Literal["mfcc", "lfcc"]
 FastModelType = Literal["logistic_regression", "random_forest", "linear_svc", "rbf_svc"]
+DEFAULT_FAST_MODEL_TYPE: FastModelType = "rbf_svc"
+RBF_MAX_TRAIN = 5000
 FastLabel = Literal["bonafide", "spoof"]
 FAST_CLIP_SECONDS = 4
 FAST_CLIP_LEN = SAMPLE_RATE * FAST_CLIP_SECONDS
@@ -111,7 +113,7 @@ class FastAudioClassifier:
         self,
         *,
         feature_type: FastFeatureType = "mfcc",
-        model_type: FastModelType = "logistic_regression",
+        model_type: FastModelType = DEFAULT_FAST_MODEL_TYPE,
         n_mfcc: int = 20,
         n_lfcc: int = 20,
     ) -> None:
@@ -162,6 +164,24 @@ class FastAudioClassifier:
             )
         raise ValueError(f"Unsupported model_type: {self.model_type}")
 
+    def _subsample_stratified(self, x: np.ndarray, y: np.ndarray, max_samples: int) -> tuple[np.ndarray, np.ndarray]:
+        if len(y) <= max_samples:
+            return x, y
+        rng = np.random.default_rng(42)
+        idx_bonafide = np.where(y == 1)[0]
+        idx_spoof = np.where(y == 0)[0]
+        ratio = len(idx_bonafide) / len(y)
+        n_bonafide = min(len(idx_bonafide), max(1, int(round(max_samples * ratio))))
+        n_spoof = min(len(idx_spoof), max_samples - n_bonafide)
+        sel = np.concatenate(
+            [
+                rng.choice(idx_bonafide, n_bonafide, replace=False),
+                rng.choice(idx_spoof, n_spoof, replace=False),
+            ]
+        )
+        rng.shuffle(sel)
+        return x[sel], y[sel]
+
     def extract_features(self, x: np.ndarray) -> np.ndarray:
         if self.feature_type == "mfcc":
             base = librosa.feature.mfcc(
@@ -208,12 +228,16 @@ class FastAudioClassifier:
         return feats.astype(np.float32, copy=False)
 
     def fit(self, x: np.ndarray, y: np.ndarray) -> None:
+        if self.model_type == "rbf_svc":
+            x, y = self._subsample_stratified(x, y, RBF_MAX_TRAIN)
         self._clf.fit(x, y)
 
+    def _uses_proba(self) -> bool:
+        return hasattr(self._clf, "predict_proba")
+
     def decision_scores(self, x: np.ndarray) -> np.ndarray:
-        if hasattr(self._clf, "predict_proba"):
+        if self._uses_proba():
             probs = self._clf.predict_proba(x)
-            # class index 1 = bonafide
             return probs[:, 1]
         if hasattr(self._clf, "decision_function"):
             scores = self._clf.decision_function(x)
@@ -239,7 +263,7 @@ class FastAudioClassifier:
         inference_ms = (time.perf_counter() - t1) * 1000.0
         is_bonafide = score_bonafide > threshold
 
-        if hasattr(self._clf, "predict_proba"):
+        if self._uses_proba():
             conf = float(max(score_bonafide, 1.0 - score_bonafide))
             score_spoof = float(1.0 - score_bonafide)
         else:

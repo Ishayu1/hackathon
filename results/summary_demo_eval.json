@@ -1,0 +1,54 @@
+{
+  "n_samples": 1866,
+  "models": {
+    "spectra_threshold": {
+      "accuracy": 0.6227224008574491,
+      "n": 1866,
+      "latency_ms": {
+        "mean_ms": 184.33106663128373,
+        "p50_ms": 181.1656718746235,
+        "p95_ms": 190.23946875040565,
+        "min_ms": 178.6192968747855,
+        "max_ms": 812.1970204992977
+      }
+    },
+    "spectra_argmax": {
+      "accuracy": 0.9260450160771704,
+      "n": 1866,
+      "latency_ms": {
+        "mean_ms": 184.288156590583,
+        "p50_ms": 184.631130249727,
+        "p95_ms": 192.58272912520624,
+        "min_ms": 178.2596978755464,
+        "max_ms": 214.26648950000526
+      }
+    },
+    "fast_asvspoof_rbf": {
+      "accuracy": 0.477491961414791,
+      "n": 1866,
+      "latency_ms": {
+        "mean_ms": 8.352214172620368,
+        "p50_ms": 7.488416002161102,
+        "p95_ms": 9.656604248448275,
+        "min_ms": 5.383833995438181,
+        "max_ms": 1162.9019169995445
+      }
+    },
+    "fast_demo_rbf": {
+      "accuracy": 0.9903536977491961,
+      "n": 1866,
+      "latency_ms": {
+        "mean_ms": 7.623909034274704,
+        "p50_ms": 7.19308350016945,
+        "p95_ms": 10.323343753043446,
+        "min_ms": 5.0976670027012005,
+        "max_ms": 32.45687500020722
+      }
+    }
+  },
+  "recommended": {
+    "spectra_decision": "argmax",
+    "demo_api_backend": "fast",
+    "demo_api_model": "/Users/ishayughosh/Downloads/Desktop (local)/Hackathon/results/fast_baseline_mfcc_rbf_svc_demo.joblib"
+  }
+}

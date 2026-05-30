@@ -15,7 +15,12 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from src.audio_preprocess import decode_audio_bytes
-from src.config import DEFAULT_FAST_MODEL, DEFAULT_FAST_PROFILE_PATH
+from src.config import (
+    DEFAULT_DEMO_FAST_MODEL,
+    DEFAULT_FAST_MODEL,
+    DEFAULT_FAST_PROFILE_PATH,
+    DEFAULT_SPECTRA_DECISION,
+)
 from src.fast_baseline import prepare_waveform_fast
 from src.fast_explain import FastFeatureProfiles, explain_fast_features
 from src.inference import initialize_inference_context, predict_one_from_bytes
@@ -23,8 +28,16 @@ from src.inference import initialize_inference_context, predict_one_from_bytes
 _ctx = None
 _profiles = None
 _backend = os.getenv("MODEL_BACKEND", "fast").strip().lower()
-_fast_model_path = os.getenv("FAST_MODEL_PATH", str(DEFAULT_FAST_MODEL))
+_fast_model_path = os.getenv(
+    "FAST_MODEL_PATH",
+    str(DEFAULT_DEMO_FAST_MODEL if DEFAULT_DEMO_FAST_MODEL.exists() else DEFAULT_FAST_MODEL),
+)
 _fast_profile_path = os.getenv("FAST_PROFILE_PATH", str(DEFAULT_FAST_PROFILE_PATH))
+_spectra_decision = os.getenv("SPECTRA_DECISION", DEFAULT_SPECTRA_DECISION).strip().lower()
+_cors_origins = os.getenv(
+    "CORS_ORIGINS",
+    "http://localhost:5173,http://127.0.0.1:5173",
+).split(",")
 
 
 @asynccontextmanager
@@ -47,7 +60,7 @@ app = FastAPI(
 )
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=[o.strip() for o in _cors_origins if o.strip()],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -61,6 +74,8 @@ def health():
         "model_loaded": _ctx is not None,
         "device": str(_ctx.device) if _ctx is not None else None,
         "backend": _backend,
+        "spectra_decision": _spectra_decision if _backend == "spectra" else None,
+        "fast_model_path": _fast_model_path if _backend == "fast" else None,
         "xai_available": bool(_ctx is not None and _ctx.backend == "fast" and _profiles is not None),
         "xai_scope": "fast MFCC/LFCC class-profile comparison only",
     }
@@ -76,7 +91,12 @@ async def classify(file: UploadFile = File(...)):
         raise HTTPException(status_code=400, detail="Empty file")
 
     try:
-        pred = predict_one_from_bytes(_ctx, data, mode="deterministic")
+        pred = predict_one_from_bytes(
+            _ctx,
+            data,
+            mode="deterministic",
+            spectra_decision=_spectra_decision,  # type: ignore[arg-type]
+        )
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Inference failed: {exc}") from exc
 
@@ -89,6 +109,7 @@ async def classify(file: UploadFile = File(...)):
             "total_ms": round(pred.total_ms, 2),
             "filename": file.filename,
             "backend": _backend,
+            "spectra_decision": _spectra_decision if _backend == "spectra" else None,
         }
     )
     if _ctx.backend == "fast":

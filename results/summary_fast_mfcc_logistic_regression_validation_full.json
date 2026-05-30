@@ -1,0 +1,40 @@
+{
+  "eval_split": "validation",
+  "n_eval": 24844,
+  "n_bonafide": 2548,
+  "n_spoof": 22296,
+  "eer": 0.1589950876434038,
+  "eer_percent": 15.89950876434038,
+  "eer_threshold": 0.04966103474576469,
+  "accuracy_at_threshold": 0.9215907261310577,
+  "eval_samples_per_sec": 178.29307751023023,
+  "feature_latency": {
+    "mean_ms": 5.6085234606082865,
+    "p50_ms": 5.33233299938729,
+    "p95_ms": 6.417833899467946,
+    "min_ms": 4.8180409939959645,
+    "max_ms": 64.17549999605399
+  },
+  "inference_latency": {
+    "mean_ms": 0.00021925652060028562,
+    "p50_ms": 0.00021925652060028562,
+    "p95_ms": 0.00021925652060028562,
+    "min_ms": 0.00021925652060028562,
+    "max_ms": 0.00021925652060028562
+  },
+  "pipeline": "fast_baseline",
+  "feature_type": "mfcc",
+  "model_type": "logistic_regression",
+  "train_split": "train",
+  "n_train": 25380,
+  "training_ms": 188.41008400340797,
+  "train_feature_latency": {
+    "mean_ms": 5.665395958438381,
+    "p50_ms": 5.318292001902591,
+    "p95_ms": 6.62409339856822,
+    "min_ms": 4.836084000999108,
+    "max_ms": 911.2440419994527
+  },
+  "model_path": "/Users/ishayughosh/Downloads/Desktop (local)/Hackathon/results/fast_baseline_mfcc_logistic_regression_full.joblib",
+  "full_split": true
+}

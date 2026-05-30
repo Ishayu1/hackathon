@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import {
   AlertTriangle,
@@ -8,6 +8,7 @@ import {
   Clock,
   FileAudio,
   Gauge,
+  Loader2,
   Lock,
   Radio,
   Radar,
@@ -17,6 +18,7 @@ import {
   Upload,
   Zap
 } from 'lucide-react';
+import { classifyAudio, getHealth, mapClassifyResponse } from './api';
 
 const intercepts = [
   {
@@ -24,7 +26,8 @@ const intercepts = [
     title: 'Routine Base Update',
     subtitle: 'Supply check-in',
     authenticity: 'Likely Real',
-    confidence: 0.18,
+    spoofScore: 0.18,
+    confidence: 0.82,
     latency: 112,
     source: 'sample',
     risk: 'LOW',
@@ -40,6 +43,7 @@ const intercepts = [
     title: 'Convoy Reroute Order',
     subtitle: 'Movement command',
     authenticity: 'Likely Synthetic',
+    spoofScore: 0.91,
     confidence: 0.91,
     latency: 184,
     source: 'sample',
@@ -57,6 +61,7 @@ const intercepts = [
     title: 'Drone Activity Warning',
     subtitle: 'Threat alert',
     authenticity: 'Uncertain',
+    spoofScore: 0.62,
     confidence: 0.62,
     latency: 156,
     source: 'sample',
@@ -188,40 +193,6 @@ function AcousticRationale({ explanation }) {
   );
 }
 
-function mapClassifyResponse(payload, filename) {
-  const spoofScore =
-    typeof payload.score_spoof === 'number'
-      ? payload.score_spoof
-      : payload.is_spoof
-        ? payload.confidence
-        : 1 - payload.confidence;
-  const modelConfidence =
-    typeof payload.confidence === 'number'
-      ? payload.confidence
-      : Math.max(spoofScore, 1 - spoofScore);
-  const isSpoof = payload.label === 'spoof' || payload.is_spoof;
-  return {
-    id: `upload-${Date.now()}`,
-    title: filename || payload.filename || 'Uploaded Audio',
-    subtitle: `${payload.backend || 'fast'} backend`,
-    authenticity: isSpoof ? 'Likely Synthetic' : 'Likely Real',
-    confidence: spoofScore,
-    modelConfidence,
-    syntheticScore: spoofScore,
-    latency: Math.round(payload.total_ms || 0),
-    risk: isSpoof ? 'HIGH' : 'LOW',
-    intent: 'Audio authenticity check',
-    transcript: 'Uploaded audio; transcript extraction is not part of this classifier.',
-    recommendation: isSpoof
-      ? 'Verify through a secondary channel before acting on this audio.'
-      : 'Classifier output is consistent with authentic training examples; continue normal verification for operational use.',
-    watch: [],
-    source: 'upload',
-    backend: payload.backend,
-    explanation: payload.explanation
-  };
-}
-
 function MetricCard({ icon: Icon, label, value, sub }) {
   return (
     <Card>
@@ -239,49 +210,82 @@ function MetricCard({ icon: Icon, label, value, sub }) {
 }
 
 export default function App() {
+  const fileInputRef = useRef(null);
   const [active, setActive] = useState(intercepts[1]);
   const [uploadResult, setUploadResult] = useState(null);
   const [uploadError, setUploadError] = useState('');
-  const [uploading, setUploading] = useState(false);
   const [mission, setMission] = useState(missionProfiles[0]);
   const [watchlist, setWatchlist] = useState('Convoy Alpha, Checkpoint Delta, Fuel Depot, Sector 7');
   const [operatorDecision, setOperatorDecision] = useState('Escalate');
-  const fileInputRef = useRef(null);
+  const [backendHealth, setBackendHealth] = useState(null);
+  const [isUploading, setIsUploading] = useState(false);
 
-  const fakeScore = Math.round((active.syntheticScore ?? active.confidence) * 100);
-  const authenticityScore =
-    active.authenticity === 'Likely Real'
-      ? Math.round(((active.modelConfidence ?? 1 - active.confidence)) * 100)
-      : Math.round(((active.modelConfidence ?? active.confidence)) * 100);
+  useEffect(() => {
+    let cancelled = false;
 
-  const systemRecommendation =
-    active.risk === 'LOW' ? 'TRUST' : active.risk === 'HIGH' ? 'VERIFY' : 'ESCALATE';
-
-  async function handleFileUpload(event) {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    setUploading(true);
-    setUploadError('');
-    try {
-      const form = new FormData();
-      form.append('file', file);
-      const apiBase = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
-      const response = await fetch(`${apiBase}/classify`, { method: 'POST', body: form });
-      if (!response.ok) {
-        const message = await response.text();
-        throw new Error(message || `Upload failed with status ${response.status}`);
+    async function checkHealth() {
+      try {
+        const health = await getHealth();
+        if (!cancelled) {
+          setBackendHealth(health);
+        }
+      } catch {
+        if (!cancelled) {
+          setBackendHealth({ status: 'offline', model_loaded: false });
+        }
       }
-      const payload = await response.json();
-      const mapped = mapClassifyResponse(payload, file.name);
+    }
+
+    checkHealth();
+    const timer = setInterval(checkHealth, 15000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, []);
+
+  const handleUploadClick = () => {
+    setUploadError('');
+    fileInputRef.current?.click();
+  };
+
+  const handleFileSelected = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+
+    setIsUploading(true);
+    setUploadError('');
+
+    try {
+      const result = await classifyAudio(file);
+      const mapped = mapClassifyResponse(result);
       setUploadResult(mapped);
       setActive(mapped);
+      setOperatorDecision(mapped.systemRecommendation);
     } catch (error) {
       setUploadError(error.message || 'Upload failed');
     } finally {
-      setUploading(false);
-      event.target.value = '';
+      setIsUploading(false);
     }
-  }
+  };
+
+  const fakeScore = Math.round((active.spoofScore ?? active.syntheticScore ?? active.confidence) * 100);
+  const authenticityScore =
+    active.authenticity === 'Likely Real'
+      ? Math.round((active.confidence ?? 1 - (active.spoofScore ?? 0)) * 100)
+      : Math.round((active.confidence ?? active.spoofScore ?? 0) * 100);
+
+  const systemRecommendation =
+    active.systemRecommendation ||
+    (active.risk === 'LOW' ? 'TRUST' : active.risk === 'HIGH' ? 'VERIFY' : 'ESCALATE');
+
+  const backendLabel = backendHealth?.model_loaded
+    ? `${backendHealth.backend} · ${backendHealth.device}`
+    : backendHealth?.status === 'offline'
+      ? 'API offline'
+      : 'Connecting…';
+
 
   return (
     <div className="app-root">
@@ -306,23 +310,35 @@ export default function App() {
               Detect synthetic mission audio, classify operational intent, and turn suspicious
               commands into clear verification decisions.
             </p>
+            <div className={`backend-pill ${backendHealth?.model_loaded ? 'online' : 'offline'}`}>
+              <span className="backend-dot" />
+              {backendLabel}
+            </div>
           </div>
           <div className="hero-actions">
             <input
               ref={fileInputRef}
               type="file"
-              accept="audio/*,.flac,.wav,.mp3,.m4a"
+              accept="audio/*,.flac,.wav,.mp3,.m4a,.ogg"
               hidden
-              onChange={handleFileUpload}
+              onChange={handleFileSelected}
             />
-            <Button onClick={() => fileInputRef.current?.click()} disabled={uploading}>
-              <Upload size={16} /> {uploading ? 'Classifying...' : 'Upload Audio'}
+            <Button onClick={handleUploadClick} disabled={isUploading}>
+              {isUploading ? <Loader2 size={16} className="spin" /> : <Upload size={16} />}
+              {isUploading ? 'Analyzing…' : 'Upload Audio'}
             </Button>
-            <Button variant="outline">
-              <Sparkles size={16} /> Generate Brief
+            <Button variant="outline" onClick={() => setActive(intercepts[1])}>
+              <Sparkles size={16} /> Load Sample
             </Button>
           </div>
         </header>
+
+        {uploadError && (
+          <div className="error-banner card">
+            <AlertTriangle size={18} />
+            <span>{uploadError}</span>
+          </div>
+        )}
 
         <div className="layout">
           <aside className="sidebar-col">
@@ -406,7 +422,7 @@ export default function App() {
                 value={active.intent.split(' /')[0]}
                 sub="Transcript classifier"
               />
-              <MetricCard icon={Clock} label="Latency" value={`${active.latency} ms`} sub="Warm inference" />
+              <MetricCard icon={Clock} label="Latency" value={`${active.latency} ms`} sub="Live inference" />
             </div>
 
             <Card className="analysis-card">

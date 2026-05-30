@@ -11,12 +11,18 @@ import torch
 import torch.nn.functional as F
 
 from src.audio_preprocess import PreprocessMode, decode_audio_bytes, prepare_batch, prepare_waveform
-from src.config import CLIP_LEN, DEFAULT_FAST_MODEL, DEFAULT_THRESHOLD
+from src.config import (
+    CLIP_LEN,
+    DEFAULT_FAST_MODEL,
+    DEFAULT_SPECTRA_DECISION,
+    DEFAULT_THRESHOLD,
+)
 from src.fast_baseline import FastAudioClassifier, prepare_waveform_fast
-from src.model_loader import load_model, warmup
+from src.model_loader import load_model, sync_device, warmup
 from vendor.spectra_aasist3.model import SpectraAASIST3
 
 BackendType = Literal["spectra", "fast"]
+SpectraDecisionMode = Literal["threshold", "argmax"]
 
 
 @dataclass
@@ -47,6 +53,8 @@ class InferenceContext:
 def logits_to_prediction(
     logits: torch.Tensor,
     threshold: float = DEFAULT_THRESHOLD,
+    *,
+    decision: SpectraDecisionMode = DEFAULT_SPECTRA_DECISION,
 ) -> Prediction:
     """
     Convert model logits to prediction.
@@ -59,7 +67,11 @@ def logits_to_prediction(
     score_spoof = float(logits[0, 0].item())
     score_bonafide = float(logits[0, 1].item())
     probs = F.softmax(logits[0], dim=0)
-    is_bonafide = score_bonafide > threshold
+
+    if decision == "argmax":
+        is_bonafide = score_bonafide >= score_spoof
+    else:
+        is_bonafide = score_bonafide > threshold
 
     return Prediction(
         label="bonafide" if is_bonafide else "spoof",
@@ -79,6 +91,7 @@ def predict_batch(
     *,
     mode: PreprocessMode = "deterministic",
     threshold: float = DEFAULT_THRESHOLD,
+    decision: SpectraDecisionMode = DEFAULT_SPECTRA_DECISION,
 ) -> tuple[list[Prediction], list[float]]:
     """
     Run batch inference.
@@ -89,16 +102,17 @@ def predict_batch(
 
     latencies_ms: list[float] = []
     with torch.inference_mode():
-        if device.type == "cuda":
-            torch.cuda.synchronize()
+        sync_device(device)
         start = time.perf_counter()
         logits = model(batch)
-        if device.type == "cuda":
-            torch.cuda.synchronize()
+        sync_device(device)
         elapsed_ms = (time.perf_counter() - start) * 1000.0
         per_sample_ms = elapsed_ms / max(len(waveforms), 1)
 
-    predictions = [logits_to_prediction(logits[i : i + 1], threshold) for i in range(logits.size(0))]
+    predictions = [
+        logits_to_prediction(logits[i : i + 1], threshold, decision=decision)
+        for i in range(logits.size(0))
+    ]
     latencies_ms = [per_sample_ms] * len(predictions)
     return predictions, latencies_ms
 
@@ -109,18 +123,17 @@ def predict_one_from_prepared(
     prepared: torch.Tensor,
     *,
     threshold: float = DEFAULT_THRESHOLD,
+    decision: SpectraDecisionMode = DEFAULT_SPECTRA_DECISION,
 ) -> tuple[Prediction, float]:
     """Run inference on an already-prepared 1D waveform."""
     batch = prepared.unsqueeze(0).to(device)
     with torch.inference_mode():
-        if device.type == "cuda":
-            torch.cuda.synchronize()
+        sync_device(device)
         start = time.perf_counter()
         logits = model(batch)
-        if device.type == "cuda":
-            torch.cuda.synchronize()
+        sync_device(device)
         inference_ms = (time.perf_counter() - start) * 1000.0
-    return logits_to_prediction(logits, threshold), inference_ms
+    return logits_to_prediction(logits, threshold, decision=decision), inference_ms
 
 
 def predict_one(
@@ -184,6 +197,7 @@ def predict_one_from_bytes(
     *,
     mode: PreprocessMode = "deterministic",
     spectra_threshold: float = DEFAULT_THRESHOLD,
+    spectra_decision: SpectraDecisionMode = DEFAULT_SPECTRA_DECISION,
     fast_threshold: float = 0.5,
 ) -> TimedPrediction:
     """
@@ -224,6 +238,7 @@ def predict_one_from_bytes(
         ctx.device,  # type: ignore[arg-type]
         prepared,
         threshold=spectra_threshold,
+        decision=spectra_decision,
     )
     total_preprocess_ms = decode_ms + preprocess_only_ms
     return TimedPrediction(

@@ -1,0 +1,38 @@
+{
+  "pipeline": "fast_baseline",
+  "feature_type": "mfcc",
+  "model_type": "logistic_regression",
+  "train_split": "train",
+  "eval_split": "validation",
+  "n_train": 5000,
+  "n_eval": 2000,
+  "eer": 0.15081866974658603,
+  "eer_percent": 15.081866974658602,
+  "eer_threshold": 0.046546815937864784,
+  "accuracy_at_threshold": 0.9165,
+  "classification_threshold": 0.5,
+  "training_ms": 24.83195900276769,
+  "eval_samples_per_sec": 176.60035480076888,
+  "feature_latency": {
+    "mean_ms": 5.662263988455379,
+    "p50_ms": 5.39620850031497,
+    "p95_ms": 6.251958353459486,
+    "min_ms": 4.9477089996798895,
+    "max_ms": 28.277791003347374
+  },
+  "inference_latency": {
+    "mean_ms": 0.00023879149739514105,
+    "p50_ms": 0.00023879149739514105,
+    "p95_ms": 0.00023879149739514105,
+    "min_ms": 0.00023879149739514105,
+    "max_ms": 0.00023879149739514105
+  },
+  "train_feature_latency": {
+    "mean_ms": 5.900786078968667,
+    "p50_ms": 5.3670620000048075,
+    "p95_ms": 6.5910395991522845,
+    "min_ms": 4.950665999785997,
+    "max_ms": 979.9593330026255
+  },
+  "model_path": "/Users/ishayughosh/Downloads/Desktop (local)/Hackathon/results/fast_baseline_mfcc_logistic_regression.joblib"
+}
