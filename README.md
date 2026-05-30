@@ -89,3 +89,13 @@ curl -X POST http://localhost:8000/classify -F "file=@sample.wav"
 | API latency p95 (CPU) | < 2 s | > 5 s |
 
 Model card baseline: **0.723% EER** on ASVspoof19 LA.
+
+## Frontend (Mission Audio Triage Dashboard)
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Then open `http://localhost:5173`.
