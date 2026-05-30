@@ -12,8 +12,11 @@ DEFAULT_THRESHOLD = -1.460938
 
 DEFAULT_FAST_MODEL = RESULTS_DIR / "fast_baseline_mfcc_rbf_svc.joblib"
 DEFAULT_DEMO_FAST_MODEL = RESULTS_DIR / "fast_baseline_mfcc_rbf_svc_demo.joblib"
+DEFAULT_FAST_PROFILE_PATH = RESULTS_DIR / "fast_demo_feature_profiles.json"
 DEMO_MANIFEST = PROJECT_ROOT / "data" / "demo" / "deepfake-audio-detection" / "manifest.json"
 DEMO_FEATURE_CACHE = RESULTS_DIR / "feature_cache_demo_mfcc.npz"
 
 # Spectra label rule: "argmax" compares logits directly; "threshold" uses ASVspoof-tuned bonafide logit cutoff
 DEFAULT_SPECTRA_DECISION = "argmax"
+
+PREPROCESS_MODES = ("deterministic", "random")

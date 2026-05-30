@@ -30,7 +30,7 @@ python scripts/run_full_fast_pipeline.py
 | **Fast baseline** (MFCC + LR, full) | test (eval) | **21.43%** | ~6.6 ms |
 | **Spectra-AASIST3** (published) | test (eval) | **0.723%** | ~190 ms (MPS) |
 
-Full comparison: `results/comparison_fast_vs_spectra.json`  
+Full comparison: `results/comparison_fast_vs_spectra.json`
 Trained model (default): `results/fast_baseline_mfcc_rbf_svc.joblib`
 
 ## Batch evaluation (ASVspoof 2019 LA)
@@ -91,7 +91,7 @@ python scripts/eval_demo_dataset.py
 | Fast RBF (ASVspoof-trained) | 47.7% | ~7 ms |
 | **Fast RBF (demo-trained)** | **99.0%** | **~7 ms** |
 
-Demo-tuned model: `results/fast_baseline_mfcc_rbf_svc_demo.joblib`  
+Demo-tuned model: `results/fast_baseline_mfcc_rbf_svc_demo.joblib`
 Full metrics: `results/summary_demo_eval.json`
 
 **Hackathon recommendation:** use **fast demo RBF** for live uploads (speed + domain match). Cite Spectra **0.723% EER on ASVspoof** for accuracy narrative; use `MODEL_BACKEND=spectra` with `SPECTRA_DECISION=argmax` when you want the neural model on demo clips.
@@ -113,6 +113,14 @@ Use Spectra neural backend:
 MODEL_BACKEND=spectra SPECTRA_DECISION=argmax uvicorn api.main:app --host 0.0.0.0 --port 8000
 ```
 
+Use demo-tuned fast baseline explicitly:
+
+```bash
+MODEL_BACKEND=fast \
+FAST_MODEL_PATH=results/fast_baseline_mfcc_rbf_svc_demo.joblib \
+uvicorn api.main:app --host 0.0.0.0 --port 8000
+```
+
 Use ASVspoof-trained fast baseline instead of demo-tuned:
 
 ```bash
@@ -122,6 +130,14 @@ MODEL_BACKEND=fast uvicorn api.main:app --host 0.0.0.0 --port 8000
 
 ```bash
 curl -X POST http://localhost:8000/classify -F "file=@sample.wav"
+```
+
+## Fast Baseline Explainability
+
+For `MODEL_BACKEND=fast`, `/classify` includes an `explanation` object generated from the same 88 MFCC/LFCC and spectral features used by the classifier. The method compares the uploaded clip's feature values with bonafide and spoof class profiles computed from the Gary Stafford demo train split only (`scripts/build_feature_profiles.py`). Top signals are ranked by which class profile they are closer to and are phrased as corpus similarity, not causal proof. Spectra/Wav2Vec2 responses return `explanation: null`; MFCC explanations are not claimed for that backend. Rebuild profiles with:
+
+```bash
+python scripts/build_feature_profiles.py
 ```
 
 ## Go / no-go criteria

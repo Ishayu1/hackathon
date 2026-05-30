@@ -29,6 +29,7 @@ const intercepts = [
     spoofScore: 0.18,
     confidence: 0.82,
     latency: 112,
+    source: 'sample',
     risk: 'LOW',
     intent: 'Routine logistics update',
     transcript:
@@ -45,6 +46,7 @@ const intercepts = [
     spoofScore: 0.91,
     confidence: 0.91,
     latency: 184,
+    source: 'sample',
     risk: 'CRITICAL',
     intent: 'Movement order / logistics reroute',
     transcript:
@@ -62,6 +64,7 @@ const intercepts = [
     spoofScore: 0.62,
     confidence: 0.62,
     latency: 156,
+    source: 'sample',
     risk: 'HIGH',
     intent: 'Threat warning',
     transcript:
@@ -99,7 +102,7 @@ function RiskPill({ risk }) {
   return <span className={`risk-pill risk-${risk.toLowerCase()}`}>{risk}</span>;
 }
 
-function Waveform({ chunks }) {
+function Waveform({ chunks, illustrative = false }) {
   const bars = useMemo(
     () =>
       Array.from({ length: 56 }, (_, i) => {
@@ -115,8 +118,8 @@ function Waveform({ chunks }) {
     <div className="wave-wrap">
       <div className="wave-topline" />
       <div className="wave-meta">
-        <span>Audio signal scan</span>
-        <span>4s windows · 1s overlap</span>
+        <span>{illustrative ? 'Sample scenario (illustrative)' : 'Audio signal scan'}</span>
+        <span>{illustrative ? 'not model output' : '4s windows · 1s overlap'}</span>
       </div>
       <div className="wave-bars">
         {bars.map((h, i) => {
@@ -145,6 +148,51 @@ function Waveform({ chunks }) {
   );
 }
 
+function AcousticRationale({ explanation }) {
+  if (!explanation) {
+    return (
+      <div className="mini-card">
+        <div className="mini-title">
+          <BrainCircuit size={16} /> Acoustic Rationale
+        </div>
+        <p className="small-note">Interpretability available for fast MFCC model only.</p>
+      </div>
+    );
+  }
+
+  if (!explanation.top_signals?.length) {
+    return (
+      <div className="mini-card">
+        <div className="mini-title">
+          <BrainCircuit size={16} /> Acoustic Rationale
+        </div>
+        <p className="small-note">{explanation.note || 'No grounded feature signals were returned.'}</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mini-card rationale-card">
+      <div className="mini-title">
+        <BrainCircuit size={16} /> Acoustic Rationale
+      </div>
+      <div className="rationale-method">{explanation.method}</div>
+      <div className="signal-list">
+        {explanation.top_signals.map((signal) => (
+          <div key={signal.name} className="signal-row">
+            <div>
+              <div className="signal-name">{signal.label || signal.name}</div>
+              <div className="signal-copy">{signal.plain_text}</div>
+            </div>
+            <div className="signal-value">{signal.value}</div>
+          </div>
+        ))}
+      </div>
+      <p className="small-note disclaimer">{explanation.disclaimer}</p>
+    </div>
+  );
+}
+
 function MetricCard({ icon: Icon, label, value, sub }) {
   return (
     <Card>
@@ -164,12 +212,13 @@ function MetricCard({ icon: Icon, label, value, sub }) {
 export default function App() {
   const fileInputRef = useRef(null);
   const [active, setActive] = useState(intercepts[1]);
+  const [uploadResult, setUploadResult] = useState(null);
+  const [uploadError, setUploadError] = useState('');
   const [mission, setMission] = useState(missionProfiles[0]);
   const [watchlist, setWatchlist] = useState('Convoy Alpha, Checkpoint Delta, Fuel Depot, Sector 7');
   const [operatorDecision, setOperatorDecision] = useState('Escalate');
   const [backendHealth, setBackendHealth] = useState(null);
   const [isUploading, setIsUploading] = useState(false);
-  const [uploadError, setUploadError] = useState('');
 
   useEffect(() => {
     let cancelled = false;
@@ -211,6 +260,7 @@ export default function App() {
     try {
       const result = await classifyAudio(file);
       const mapped = mapClassifyResponse(result);
+      setUploadResult(mapped);
       setActive(mapped);
       setOperatorDecision(mapped.systemRecommendation);
     } catch (error) {
@@ -220,11 +270,11 @@ export default function App() {
     }
   };
 
-  const fakeScore = Math.round((active.spoofScore ?? active.confidence) * 100);
+  const fakeScore = Math.round((active.spoofScore ?? active.syntheticScore ?? active.confidence) * 100);
   const authenticityScore =
     active.authenticity === 'Likely Real'
-      ? Math.round((1 - (active.spoofScore ?? active.confidence)) * 100)
-      : fakeScore;
+      ? Math.round((active.confidence ?? 1 - (active.spoofScore ?? 0)) * 100)
+      : Math.round((active.confidence ?? active.spoofScore ?? 0) * 100);
 
   const systemRecommendation =
     active.systemRecommendation ||
@@ -235,6 +285,7 @@ export default function App() {
     : backendHealth?.status === 'offline'
       ? 'API offline'
       : 'Connecting…';
+
 
   return (
     <div className="app-root">
@@ -323,10 +374,25 @@ export default function App() {
                 <h2>Sample Intercepts</h2>
               </div>
               <div className="stack">
+                {uploadResult && (
+                  <button
+                    onClick={() => setActive(uploadResult)}
+                    className={`choice-btn intercept ${active.id === uploadResult.id ? 'active-fuchsia' : ''}`}
+                  >
+                    <div>
+                      <div className="intercept-title">Latest Upload</div>
+                      <div className="intercept-sub">{uploadResult.title}</div>
+                    </div>
+                    <FileAudio size={18} />
+                  </button>
+                )}
                 {intercepts.map((item) => (
                   <button
                     key={item.id}
-                    onClick={() => setActive(item)}
+                    onClick={() => {
+                      setActive(item);
+                      setUploadError('');
+                    }}
                     className={`choice-btn intercept ${active.id === item.id ? 'active-fuchsia' : ''}`}
                   >
                     <div>
@@ -337,6 +403,7 @@ export default function App() {
                   </button>
                 ))}
               </div>
+              {uploadError && <p className="small-note upload-error">{uploadError}</p>}
             </Card>
           </aside>
 
@@ -371,7 +438,11 @@ export default function App() {
 
               <div className="analysis-grid">
                 <div className="left-stack">
-                  <Waveform chunks={active.chunks} />
+                  {active.source === 'upload' ? (
+                    <AcousticRationale explanation={active.explanation} />
+                  ) : (
+                    <Waveform chunks={active.chunks} illustrative />
+                  )}
 
                   <div className="two-col">
                     <div className="mini-card">
@@ -413,6 +484,7 @@ export default function App() {
                   <div className="mini-card">
                     <div className="label">Watchlist Matches</div>
                     <div className="chips">
+                      {active.watch.length === 0 && <span className="chip muted-chip">No extracted matches</span>}
                       {active.watch.map((term) => (
                         <span key={term} className="chip">
                           {term}

@@ -13,9 +13,9 @@ import torch.nn.functional as F
 from src.audio_preprocess import PreprocessMode, decode_audio_bytes, prepare_batch, prepare_waveform
 from src.config import (
     CLIP_LEN,
+    DEFAULT_FAST_MODEL,
     DEFAULT_SPECTRA_DECISION,
     DEFAULT_THRESHOLD,
-    DEFAULT_FAST_MODEL,
 )
 from src.fast_baseline import FastAudioClassifier, prepare_waveform_fast
 from src.model_loader import load_model, sync_device, warmup

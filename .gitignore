@@ -13,7 +13,6 @@ data/
 results/*.npz
 results/*.tsv
 results/*.log
-results/*.joblib
 
 # Frontend
 frontend/node_modules/

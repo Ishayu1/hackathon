@@ -28,7 +28,10 @@ export async function classifyAudio(file, { signal } = {}) {
 }
 
 export function mapClassifyResponse(result) {
-  const spoofScore = Math.min(1, Math.max(0, result.score_spoof ?? (result.is_spoof ? result.confidence : 1 - result.confidence)));
+  const spoofScore = Math.min(
+    1,
+    Math.max(0, result.score_spoof ?? (result.is_spoof ? result.confidence : 1 - result.confidence))
+  );
   const isUncertain = result.confidence < 0.85;
 
   let authenticity;
@@ -44,7 +47,7 @@ export function mapClassifyResponse(result) {
       systemRecommendation = 'VERIFY';
     } else {
       risk = 'LOW';
-      recommendation = 'Audio appears authentic. Log and continue routine monitoring.';
+      recommendation = 'Audio is consistent with authentic training examples. Log and continue routine monitoring.';
       systemRecommendation = 'TRUST';
     }
   } else {
@@ -55,13 +58,10 @@ export function mapClassifyResponse(result) {
       systemRecommendation = 'VERIFY';
     } else {
       risk = 'CRITICAL';
-      recommendation = 'Synthetic speech detected. Do not execute commands automatically. Escalate immediately.';
+      recommendation = 'Audio is consistent with spoof training examples. Do not execute commands automatically; escalate immediately.';
       systemRecommendation = 'ESCALATE';
     }
   }
-
-  const base = Math.max(0.05, spoofScore);
-  const chunks = [0.85, 0.92, 1.04, 0.97, 0.88].map((m) => Math.min(0.99, base * m));
 
   return {
     id: `upload-${Date.now()}`,
@@ -76,8 +76,10 @@ export function mapClassifyResponse(result) {
     transcript: `Screened with ${result.backend} backend. Spoof probability ${Math.round(spoofScore * 100)}%.`,
     recommendation,
     systemRecommendation,
-    chunks,
-    watch: result.backend === 'fast' ? ['MFCC RBF'] : ['Spectra-AASIST3'],
+    source: 'upload',
+    chunks: [],
+    watch: result.backend === 'fast' ? ['Fast MFCC model'] : ['Spectra-AASIST3'],
+    explanation: result.explanation,
     raw: result
   };
 }
