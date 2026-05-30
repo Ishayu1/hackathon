@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 from contextlib import asynccontextmanager
 from dataclasses import asdict
@@ -12,18 +13,21 @@ from fastapi import FastAPI, File, HTTPException, UploadFile
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from src.audio_preprocess import load_audio_from_bytes
-from src.inference import initialize_inference, predict_one_from_prepared
-from src.model_loader import get_loaded_model
+from src.inference import initialize_inference_context, predict_one_from_bytes
 
-_model = None
-_device = None
+_ctx = None
+_backend = os.getenv("MODEL_BACKEND", "spectra").strip().lower()
+_fast_model_path = os.getenv("FAST_MODEL_PATH", "results/fast_baseline_mfcc_logistic_regression.joblib")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _model, _device
-    _model, _device = initialize_inference("auto")
+    global _ctx
+    _ctx = initialize_inference_context(
+        backend="fast" if _backend == "fast" else "spectra",
+        device="auto",
+        fast_model_path=_fast_model_path,
+    )
     yield
 
 
@@ -36,49 +40,37 @@ app = FastAPI(
 
 @app.get("/health")
 def health():
-    try:
-        model, device = get_loaded_model()
-        return {
-            "status": "ok",
-            "model_loaded": model is not None,
-            "device": str(device),
-        }
-    except RuntimeError:
-        return {
-            "status": "loading",
-            "model_loaded": False,
-            "device": None,
-        }
+    return {
+        "status": "ok" if _ctx is not None else "loading",
+        "model_loaded": _ctx is not None,
+        "device": str(_ctx.device) if _ctx is not None else None,
+        "backend": _backend,
+    }
 
 
 @app.post("/classify")
 async def classify(file: UploadFile = File(...)):
-    if _model is None or _device is None:
+    if _ctx is None:
         raise HTTPException(status_code=503, detail="Model not loaded yet")
 
     data = await file.read()
     if not data:
         raise HTTPException(status_code=400, detail="Empty file")
 
-    import time
-
-    t0 = time.perf_counter()
     try:
-        prepared = load_audio_from_bytes(data, mode="deterministic")
+        pred = predict_one_from_bytes(_ctx, data, mode="deterministic")
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"Could not decode audio: {exc}") from exc
-    preprocess_ms = (time.perf_counter() - t0) * 1000.0
-
-    pred, inference_ms = predict_one_from_prepared(_model, _device, prepared)
-    total_ms = preprocess_ms + inference_ms
+        raise HTTPException(status_code=400, detail=f"Inference failed: {exc}") from exc
 
     result = asdict(pred)
     result.update(
         {
-            "preprocess_ms": round(preprocess_ms, 2),
-            "inference_ms": round(inference_ms, 2),
-            "total_ms": round(total_ms, 2),
+            "preprocess_ms": round(pred.preprocess_ms, 2),
+            "feature_ms": round(pred.feature_ms, 2),
+            "inference_ms": round(pred.inference_ms, 2),
+            "total_ms": round(pred.total_ms, 2),
             "filename": file.filename,
+            "backend": _backend,
         }
     )
     return result
