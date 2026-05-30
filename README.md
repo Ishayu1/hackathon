@@ -2,6 +2,10 @@
 
 Inference pipeline using [Spectra-AASIST3](https://huggingface.co/lab260/Spectra-AASIST3) with ASVspoof 2019 LA evaluation and a FastAPI upload endpoint.
 
+Also includes a **fast hackathon fallback**:
+- `16k mono -> 4s crop/pad -> MFCC/LFCC + spectral features -> sklearn classifier`
+- Supports `LogisticRegression`, `RandomForestClassifier`, and `LinearSVC`.
+
 ## Setup
 
 ```bash
@@ -30,9 +34,45 @@ python scripts/eval_asvspoof.py --split test --batch-size 16
 
 Results are written to `results/scores_{split}.tsv` and `results/summary_{split}.json`.
 
+## Fast baseline (recommended hackathon fallback)
+
+Train on ASVspoof train split and evaluate quickly:
+
+```bash
+# Fast default: MFCC + Logistic Regression
+python scripts/eval_fast_baseline.py \
+  --train-split train \
+  --eval-split validation \
+  --max-train-samples 8000 \
+  --max-eval-samples 3000 \
+  --feature-type mfcc \
+  --model-type logistic_regression
+
+# Alternative: MFCC + Random Forest
+python scripts/eval_fast_baseline.py \
+  --feature-type mfcc \
+  --model-type random_forest
+```
+
+Outputs:
+- model artifact: `results/fast_baseline_{feature}_{model}.joblib`
+- metrics: `results/summary_fast_{feature}_{model}_{split}.json`
+- scores: `results/scores_fast_{feature}_{model}_{split}.tsv`
+
 ## API
 
 ```bash
+uvicorn api.main:app --host 0.0.0.0 --port 8000
+```
+
+Use Spectra (default):
+- `MODEL_BACKEND=spectra`
+
+Use fast baseline:
+
+```bash
+MODEL_BACKEND=fast \
+FAST_MODEL_PATH=results/fast_baseline_mfcc_logistic_regression.joblib \
 uvicorn api.main:app --host 0.0.0.0 --port 8000
 ```
 
@@ -49,3 +89,13 @@ curl -X POST http://localhost:8000/classify -F "file=@sample.wav"
 | API latency p95 (CPU) | < 2 s | > 5 s |
 
 Model card baseline: **0.723% EER** on ASVspoof19 LA.
+
+## Frontend (Mission Audio Triage Dashboard)
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Then open `http://localhost:5173`.

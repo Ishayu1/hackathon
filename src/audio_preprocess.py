@@ -103,9 +103,22 @@ def load_audio_from_path(path: str | Path, *, mode: PreprocessMode = "determinis
 
 def load_audio_from_bytes(data: bytes, *, mode: PreprocessMode = "deterministic") -> torch.Tensor:
     """Load audio from bytes (API uploads)."""
+    waveform, sr = decode_audio_bytes(data)
+    return prepare_waveform(waveform, sr, mode=mode)
+
+
+def decode_audio_from_path(path: str | Path) -> tuple[torch.Tensor, int]:
+    """Decode audio file to raw waveform tensor + sample rate."""
+    audio, sr = sf.read(str(path), dtype="float32")
+    waveform = torch.from_numpy(audio)
+    return waveform, int(sr)
+
+
+def decode_audio_bytes(data: bytes) -> tuple[torch.Tensor, int]:
+    """Decode audio bytes to raw waveform tensor + sample rate."""
     audio, sr = sf.read(io.BytesIO(data), dtype="float32")
     waveform = torch.from_numpy(audio)
-    return prepare_waveform(waveform, sr, mode=mode)
+    return waveform, int(sr)
 
 
 def waveform_from_hf_audio(

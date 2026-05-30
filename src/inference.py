@@ -1,18 +1,22 @@
-"""Inference helpers for Spectra-AASIST3."""
+"""Inference helpers for Spectra-AASIST3 and fast classical baseline."""
 
 from __future__ import annotations
 
 import time
 from dataclasses import dataclass
-from typing import Literal
+from pathlib import Path
+from typing import Any, Literal
 
 import torch
 import torch.nn.functional as F
 
-from src.audio_preprocess import PreprocessMode, prepare_batch, prepare_waveform
+from src.audio_preprocess import PreprocessMode, decode_audio_bytes, prepare_batch, prepare_waveform
 from src.config import CLIP_LEN, DEFAULT_THRESHOLD
+from src.fast_baseline import FastAudioClassifier, prepare_waveform_fast
 from src.model_loader import load_model, warmup
 from vendor.spectra_aasist3.model import SpectraAASIST3
+
+BackendType = Literal["spectra", "fast"]
 
 
 @dataclass
@@ -28,8 +32,16 @@ class Prediction:
 @dataclass
 class TimedPrediction(Prediction):
     preprocess_ms: float = 0.0
+    feature_ms: float = 0.0
     inference_ms: float = 0.0
     total_ms: float = 0.0
+
+
+@dataclass
+class InferenceContext:
+    backend: BackendType
+    model: Any
+    device: torch.device | str
 
 
 def logits_to_prediction(
@@ -148,6 +160,84 @@ def initialize_inference(device: str = "auto") -> tuple[SpectraAASIST3, torch.de
     model, resolved = load_model(device)
     warmup(model, resolved)
     return model, resolved
+
+
+def initialize_inference_context(
+    *,
+    backend: BackendType = "spectra",
+    device: str = "auto",
+    fast_model_path: str | Path | None = None,
+) -> InferenceContext:
+    """Initialize either Spectra-AASIST3 or fast baseline backend."""
+    if backend == "fast":
+        model_path = Path(fast_model_path or "results/fast_baseline_mfcc_logistic_regression.joblib")
+        model = FastAudioClassifier.load(model_path)
+        return InferenceContext(backend="fast", model=model, device="cpu")
+
+    model, resolved = initialize_inference(device)
+    return InferenceContext(backend="spectra", model=model, device=resolved)
+
+
+def predict_one_from_bytes(
+    ctx: InferenceContext,
+    data: bytes,
+    *,
+    mode: PreprocessMode = "deterministic",
+    spectra_threshold: float = DEFAULT_THRESHOLD,
+    fast_threshold: float = 0.5,
+) -> TimedPrediction:
+    """
+    Unified single-file inference entrypoint.
+
+    Handles decode + preprocess + backend-specific inference and returns consistent timings.
+    """
+    t0 = time.perf_counter()
+    waveform, sample_rate = decode_audio_bytes(data)
+    decode_ms = (time.perf_counter() - t0) * 1000.0
+
+    if ctx.backend == "fast":
+        t1 = time.perf_counter()
+        prepared = prepare_waveform_fast(waveform, sample_rate)
+        preprocess_ms = (time.perf_counter() - t1) * 1000.0
+        pred, feature_ms, inference_ms = ctx.model.predict_one_from_prepared(  # type: ignore[union-attr]
+            prepared, threshold=fast_threshold
+        )
+        total_ms = decode_ms + preprocess_ms + feature_ms + inference_ms
+        return TimedPrediction(
+            label=pred.label,
+            is_spoof=pred.is_spoof,
+            score_spoof=pred.score_spoof,
+            score_bonafide=pred.score_bonafide,
+            confidence=pred.confidence,
+            threshold=pred.threshold,
+            preprocess_ms=decode_ms + preprocess_ms,
+            feature_ms=feature_ms,
+            inference_ms=inference_ms,
+            total_ms=total_ms,
+        )
+
+    t2 = time.perf_counter()
+    prepared = prepare_waveform(waveform, sample_rate, mode=mode)
+    preprocess_only_ms = (time.perf_counter() - t2) * 1000.0
+    pred, inference_ms = predict_one_from_prepared(
+        ctx.model,  # type: ignore[arg-type]
+        ctx.device,  # type: ignore[arg-type]
+        prepared,
+        threshold=spectra_threshold,
+    )
+    total_preprocess_ms = decode_ms + preprocess_only_ms
+    return TimedPrediction(
+        label=pred.label,
+        is_spoof=pred.is_spoof,
+        score_spoof=pred.score_spoof,
+        score_bonafide=pred.score_bonafide,
+        confidence=pred.confidence,
+        threshold=pred.threshold,
+        preprocess_ms=total_preprocess_ms,
+        feature_ms=0.0,
+        inference_ms=inference_ms,
+        total_ms=total_preprocess_ms + inference_ms,
+    )
 
 
 def bonafide_logit_from_logits(logits: torch.Tensor) -> torch.Tensor:
