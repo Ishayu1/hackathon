@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+.env
+
+# Datasets & large artifacts (use scripts/download_demo_dataset.py)
+data/
+
+# Generated results & caches
+results/*.npz
+results/*.tsv
+results/*.log
+results/*.joblib
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# OS
+.DS_Store

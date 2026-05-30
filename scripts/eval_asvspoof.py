@@ -11,14 +11,15 @@ from pathlib import Path
 
 import numpy as np
 import torch
-from datasets import load_dataset
+from datasets import Audio, load_dataset
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from src.audio_preprocess import PreprocessMode, waveform_from_hf_audio
+from src.audio_preprocess import PreprocessMode, prepare_waveform, waveform_from_hf_audio
 from src.config import DEFAULT_THRESHOLD, PREPROCESS_MODES, RESULTS_DIR
 from src.inference import bonafide_logit_from_logits, initialize_inference
+from src.model_loader import sync_device
 from src.metrics import accuracy_at_threshold, compute_eer, latency_stats
 
 
@@ -32,7 +33,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--batch-size", type=int, default=8)
     parser.add_argument("--max-samples", type=int, default=None)
-    parser.add_argument("--device", default="auto", choices=["auto", "cpu", "cuda"])
+    parser.add_argument("--device", default="auto", choices=["auto", "cpu", "cuda", "mps"])
     parser.add_argument(
         "--preprocess",
         default="deterministic",
@@ -40,11 +41,47 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--threshold", type=float, default=DEFAULT_THRESHOLD)
     parser.add_argument("--output-dir", type=Path, default=RESULTS_DIR)
+    parser.add_argument(
+        "--streaming",
+        action="store_true",
+        help="Stream dataset from HF (avoids full ~7.5GB local download)",
+    )
     return parser.parse_args()
 
 
-def label_is_bonafide(key: str) -> bool:
-    return key.strip().lower() == "bonafide"
+SPLIT_SIZES = {
+    "train": 25380,
+    "validation": 24844,
+    "test": 71237,
+}
+
+
+def row_to_prepared(row: dict, mode: PreprocessMode) -> torch.Tensor:
+    """Decode dataset row audio without torchcodec dependency."""
+    audio = row["audio"]
+    if isinstance(audio, dict) and "array" in audio:
+        return waveform_from_hf_audio(audio, mode=mode)
+
+    if isinstance(audio, dict) and "bytes" in audio and audio["bytes"] is not None:
+        import io
+
+        import soundfile as sf
+
+        decoded, sr = sf.read(io.BytesIO(audio["bytes"]), dtype="float32")
+        waveform = torch.from_numpy(np.asarray(decoded, dtype=np.float32))
+        return prepare_waveform(waveform, sr, mode=mode)
+
+    raise ValueError(f"Unsupported audio format in row: {type(audio)}")
+
+
+def label_is_bonafide(key) -> bool:
+    """HF dataset uses 0=bonafide, 1=spoof."""
+    if isinstance(key, str):
+        k = key.strip().lower()
+        return k in ("bonafide", "real", "0")
+    if isinstance(key, (int, np.integer)):
+        return int(key) == 0
+    raise ValueError(f"Unsupported label format: {type(key)}")
 
 
 def run_eval(args: argparse.Namespace) -> dict:
@@ -55,17 +92,30 @@ def run_eval(args: argparse.Namespace) -> dict:
     model, device = initialize_inference(args.device)
     print(f"Model ready on {device}")
 
-    print(f"Loading dataset split={args.split} ...")
-    dataset = load_dataset("Bisher/ASVspoof_2019_LA", split=args.split)
+    use_streaming = args.streaming or args.max_samples is not None
+    print(f"Loading dataset split={args.split} (streaming={use_streaming}) ...")
 
-    required_cols = {"audio", "audio_file_name", "key"}
-    missing = required_cols - set(dataset.column_names)
-    if missing:
-        raise ValueError(f"Dataset missing columns: {missing}")
-
-    n_total = len(dataset)
-    if args.max_samples is not None:
-        n_total = min(n_total, args.max_samples)
+    if use_streaming:
+        dataset = load_dataset(
+            "Bisher/ASVspoof_2019_LA",
+            split=args.split,
+            streaming=True,
+        )
+        dataset = dataset.cast_column("audio", Audio(decode=False))
+        n_total = SPLIT_SIZES[args.split]
+        if args.max_samples is not None:
+            n_total = min(n_total, args.max_samples)
+        row_iter = iter(dataset)
+    else:
+        dataset = load_dataset("Bisher/ASVspoof_2019_LA", split=args.split)
+        required_cols = {"audio", "audio_file_name", "key"}
+        missing = required_cols - set(dataset.column_names)
+        if missing:
+            raise ValueError(f"Dataset missing columns: {missing}")
+        n_total = len(dataset)
+        if args.max_samples is not None:
+            n_total = min(n_total, args.max_samples)
+        row_iter = None
 
     utterance_ids: list[str] = []
     bonafide_logits: list[float] = []
@@ -85,12 +135,10 @@ def run_eval(args: argparse.Namespace) -> dict:
 
         prepared = torch.stack(batch_waveforms).to(device)
         with torch.inference_mode():
-            if device.type == "cuda":
-                torch.cuda.synchronize()
+            sync_device(device)
             t0 = time.perf_counter()
             logits = model(prepared)
-            if device.type == "cuda":
-                torch.cuda.synchronize()
+            sync_device(device)
             batch_ms = (time.perf_counter() - t0) * 1000.0
 
         scores = bonafide_logit_from_logits(logits).cpu().numpy()
@@ -108,8 +156,8 @@ def run_eval(args: argparse.Namespace) -> dict:
     mode: PreprocessMode = args.preprocess  # type: ignore[assignment]
 
     for idx in range(n_total):
-        row = dataset[idx]
-        prepared = waveform_from_hf_audio(row["audio"], mode=mode)
+        row = next(row_iter) if row_iter is not None else dataset[idx]
+        prepared = row_to_prepared(row, mode)
         batch_waveforms.append(prepared)
         batch_ids.append(row["audio_file_name"])
         batch_labels.append(1 if label_is_bonafide(row["key"]) else 0)
@@ -145,6 +193,7 @@ def run_eval(args: argparse.Namespace) -> dict:
         "accuracy_at_threshold": acc,
         "classification_threshold": args.threshold,
         "preprocess_mode": args.preprocess,
+        "streaming": use_streaming,
         "device": str(device),
         "batch_size": args.batch_size,
         "total_elapsed_s": total_elapsed,

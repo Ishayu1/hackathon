@@ -1,0 +1,68 @@
+{
+  "n_train": 8000,
+  "n_eval": 3000,
+  "eval_split": "validation",
+  "spectra_published_test_eer_percent": 0.723,
+  "results": [
+    {
+      "classifier": "rbf_svc",
+      "n_train_used": 5000,
+      "n_eval": 3000,
+      "eer_percent": 10.39539954844561,
+      "eer_threshold": 0.0576333560602166,
+      "accuracy_at_threshold": 0.9473333333333334,
+      "threshold": 0.5,
+      "train_ms": 1569.1420000002836,
+      "eval_infer_ms": 248.47937499725958,
+      "infer_ms_per_sample": 0.08282645833241986
+    },
+    {
+      "classifier": "random_forest",
+      "n_train_used": 8000,
+      "n_eval": 3000,
+      "eer_percent": 11.328177765770633,
+      "eer_threshold": 0.16,
+      "accuracy_at_threshold": 0.915,
+      "threshold": 0.5,
+      "train_ms": 812.2666659983224,
+      "eval_infer_ms": 26.902416000666562,
+      "infer_ms_per_sample": 0.008967472000222187
+    },
+    {
+      "classifier": "gradient_boosting",
+      "n_train_used": 8000,
+      "n_eval": 3000,
+      "eer_percent": 11.968603461916985,
+      "eer_threshold": 0.0558619540535614,
+      "accuracy_at_threshold": 0.9253333333333333,
+      "threshold": 0.5,
+      "train_ms": 17538.055333003285,
+      "eval_infer_ms": 5.3515420004259795,
+      "infer_ms_per_sample": 0.0017838473334753264
+    },
+    {
+      "classifier": "linear_svc",
+      "n_train_used": 8000,
+      "n_eval": 3000,
+      "eer_percent": 15.008394280311071,
+      "eer_threshold": -0.7949448967060513,
+      "accuracy_at_threshold": 0.9213333333333333,
+      "threshold": 0.0,
+      "train_ms": 125.71883299824549,
+      "eval_infer_ms": 0.6395419986802153,
+      "infer_ms_per_sample": 0.00021318066622673845
+    },
+    {
+      "classifier": "logistic_regression",
+      "n_train_used": 8000,
+      "n_eval": 3000,
+      "eer_percent": 15.319320352752747,
+      "eer_threshold": 0.06589522195849656,
+      "accuracy_at_threshold": 0.9223333333333333,
+      "threshold": 0.5,
+      "train_ms": 98.14158299559494,
+      "eval_infer_ms": 0.9693750034784898,
+      "infer_ms_per_sample": 0.0003231250011594966
+    }
+  ]
+}

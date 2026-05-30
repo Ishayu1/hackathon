@@ -9,15 +9,21 @@ from dataclasses import asdict
 from pathlib import Path
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+from src.config import DEFAULT_DEMO_FAST_MODEL, DEFAULT_FAST_MODEL, DEFAULT_SPECTRA_DECISION
 from src.inference import initialize_inference_context, predict_one_from_bytes
 
 _ctx = None
-_backend = os.getenv("MODEL_BACKEND", "spectra").strip().lower()
-_fast_model_path = os.getenv("FAST_MODEL_PATH", "results/fast_baseline_mfcc_logistic_regression.joblib")
+_backend = os.getenv("MODEL_BACKEND", "fast").strip().lower()
+_fast_model_path = os.getenv(
+    "FAST_MODEL_PATH",
+    str(DEFAULT_DEMO_FAST_MODEL if DEFAULT_DEMO_FAST_MODEL.exists() else DEFAULT_FAST_MODEL),
+)
+_spectra_decision = os.getenv("SPECTRA_DECISION", DEFAULT_SPECTRA_DECISION).strip().lower()
 
 
 @asynccontextmanager
@@ -37,6 +43,18 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+_cors_origins = os.getenv(
+    "CORS_ORIGINS",
+    "http://localhost:5173,http://127.0.0.1:5173",
+).split(",")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[o.strip() for o in _cors_origins if o.strip()],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 
 @app.get("/health")
 def health():
@@ -45,6 +63,8 @@ def health():
         "model_loaded": _ctx is not None,
         "device": str(_ctx.device) if _ctx is not None else None,
         "backend": _backend,
+        "spectra_decision": _spectra_decision if _backend == "spectra" else None,
+        "fast_model_path": _fast_model_path if _backend == "fast" else None,
     }
 
 
@@ -58,7 +78,12 @@ async def classify(file: UploadFile = File(...)):
         raise HTTPException(status_code=400, detail="Empty file")
 
     try:
-        pred = predict_one_from_bytes(_ctx, data, mode="deterministic")
+        pred = predict_one_from_bytes(
+            _ctx,
+            data,
+            mode="deterministic",
+            spectra_decision=_spectra_decision,  # type: ignore[arg-type]
+        )
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Inference failed: {exc}") from exc
 
@@ -71,6 +96,7 @@ async def classify(file: UploadFile = File(...)):
             "total_ms": round(pred.total_ms, 2),
             "filename": file.filename,
             "backend": _backend,
+            "spectra_decision": _spectra_decision if _backend == "spectra" else None,
         }
     )
     return result

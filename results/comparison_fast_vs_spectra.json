@@ -1,0 +1,15 @@
+{
+  "fast_baseline": {
+    "validation_dev_eer_percent": 15.89950876434038,
+    "test_eval_eer_percent": 21.427303157157258,
+    "n_train": 25380,
+    "n_eval_test": 71237,
+    "feature_latency_p95_ms": 6.616824997763614
+  },
+  "spectra_aasist3_published": {
+    "ASVspoof19_LA_eval_eer_percent": 0.723,
+    "source": "https://huggingface.co/lab260/Spectra-AASIST3"
+  },
+  "delta_test_eer_percent": 20.70430315715726,
+  "speed_ratio_vs_spectra_mps": "~190ms / ~6ms \u2248 32x faster (fast baseline on CPU)"
+}

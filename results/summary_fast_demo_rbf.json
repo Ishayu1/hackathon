@@ -1,0 +1,21 @@
+{
+  "model": "mfcc_rbf_svc_demo",
+  "model_path": "/Users/ishayughosh/Downloads/Desktop (local)/Hackathon/results/fast_baseline_mfcc_rbf_svc_demo.joblib",
+  "train_ms": 215.79158299573464,
+  "n_train": 1492,
+  "n_test": 374,
+  "train_metrics": {
+    "eer_percent": 0.2680965147453083,
+    "eer_threshold": 0.10268468852358167,
+    "accuracy": 0.9966487935656837,
+    "n_bonafide": 746,
+    "n_spoof": 746
+  },
+  "test_metrics": {
+    "eer_percent": 3.7433155080213902,
+    "eer_threshold": 0.28959635453552374,
+    "accuracy": 0.9652406417112299,
+    "n_bonafide": 187,
+    "n_spoof": 187
+  }
+}
