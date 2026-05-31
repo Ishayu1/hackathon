@@ -522,6 +522,12 @@ body {
   font-weight: 900;
 }
 
+.custom-chip {
+  border-color: rgba(232, 121, 249, 0.35);
+  background: rgba(232, 121, 249, 0.1);
+  color: #f5d0fe;
+}
+
 .quote {
   font-size: 1.1rem;
   color: #f1f5f9;

@@ -11,3 +11,4 @@ python-multipart
 numpy
 scikit-learn
 librosa
+faster-whisper

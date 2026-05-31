@@ -18,7 +18,7 @@ import {
   Upload,
   Zap
 } from 'lucide-react';
-import { classifyAudio, getHealth, mapClassifyResponse } from './api';
+import { applyTranscriptionResult, classifyAudio, getHealth, mapClassifyResponse, transcribeAudio } from './api';
 
 const intercepts = [
   {
@@ -263,6 +263,25 @@ export default function App() {
       setUploadResult(mapped);
       setActive(mapped);
       setOperatorDecision(mapped.systemRecommendation);
+
+      transcribeAudio(file, {
+        customKeywords: watchlist,
+        deepfakeProbability: mapped.spoofScore
+      })
+        .then((transcription) => {
+          const updated = applyTranscriptionResult(mapped, transcription);
+          setUploadResult((current) => (current?.id === mapped.id ? updated : current));
+          setActive((current) => (current?.id === mapped.id ? updated : current));
+          setOperatorDecision(updated.systemRecommendation);
+        })
+        .catch((error) => {
+          const updated = applyTranscriptionResult(mapped, {
+            available: false,
+            error: error.message || 'Transcription failed'
+          });
+          setUploadResult((current) => (current?.id === mapped.id ? updated : current));
+          setActive((current) => (current?.id === mapped.id ? updated : current));
+        });
     } catch (error) {
       setUploadError(error.message || 'Upload failed');
     } finally {
@@ -307,8 +326,8 @@ export default function App() {
               SignalShield <span className="brand-grad">AI</span>
             </h1>
             <p>
-              Detect synthetic mission audio, classify operational intent, and turn suspicious
-              commands into clear verification decisions.
+              Detect synthetic mission audio, transcribe operational content, and combine both
+              signals into clear verification decisions.
             </p>
             <div className={`backend-pill ${backendHealth?.model_loaded ? 'online' : 'offline'}`}>
               <span className="backend-dot" />
@@ -409,7 +428,7 @@ export default function App() {
 
           <section className="main-col">
             <div className="metric-grid">
-              <MetricCard icon={ShieldAlert} label="Risk" value={active.risk} sub={`Mission: ${mission}`} />
+              <MetricCard icon={ShieldAlert} label="Overall Risk" value={active.risk} sub="Authenticity + severity" />
               <MetricCard
                 icon={Gauge}
                 label="Authenticity"
@@ -418,9 +437,9 @@ export default function App() {
               />
               <MetricCard
                 icon={BrainCircuit}
-                label="Intent"
+                label="Category"
                 value={active.intent.split(' /')[0]}
-                sub="Transcript classifier"
+                sub="From transcript"
               />
               <MetricCard icon={Clock} label="Latency" value={`${active.latency} ms`} sub="Live inference" />
             </div>
@@ -429,7 +448,7 @@ export default function App() {
               <div className="analysis-head">
                 <div>
                   <div className="analysis-eyebrow">
-                    <AudioWaveform size={18} /> Active Intercept Analysis
+                    <AudioWaveform size={18} /> Audio + Transcript Analysis
                   </div>
                   <h2>{active.title}</h2>
                 </div>
@@ -479,6 +498,7 @@ export default function App() {
                   <div className="mini-card">
                     <div className="label">Transcript</div>
                     <p className="quote">“{active.transcript}”</p>
+                    {active.isTranscribing && <p className="small-note">Authenticity is ready. Transcription is still running.</p>}
                   </div>
 
                   <div className="mini-card">
@@ -520,7 +540,7 @@ export default function App() {
                   </div>
 
                   <div className="mini-card">
-                    <div className="label">Analyst Summary</div>
+                    <div className="label">Analysis Summary</div>
                     <p className="small-note">
                       In a <strong>{mission}</strong> context, this intercept is classified as{' '}
                       <strong>{active.intent}</strong>. The system recommends{' '}
@@ -531,7 +551,7 @@ export default function App() {
                             ? 'verification before action'
                             : 'immediate escalation'}
                       </strong>{' '}
-                      based on authenticity confidence and operational impact.
+                      based on authenticity confidence, transcript severity, and operational impact.
                     </p>
                     <p className="small-note">Operator selected: {operatorDecision.toUpperCase()}</p>
                   </div>
