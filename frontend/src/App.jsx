@@ -99,44 +99,6 @@ function AudioPlayer({ url, label = 'Play clip' }) {
   );
 }
 
-function AcousticRationale({ explanation }) {
-  if (!explanation) {
-    return (
-      <div className="mini-card">
-        <div className="mini-title">
-          <BrainCircuit size={16} /> Acoustic Rationale
-        </div>
-        <p className="small-note">Interpretability available for fast MFCC model only.</p>
-      </div>
-    );
-  }
-
-  if (!explanation.top_signals?.length) {
-    return (
-      <div className="mini-card">
-        <div className="mini-title">
-          <BrainCircuit size={16} /> Acoustic Rationale
-        </div>
-        <p className="small-note">{explanation.note || 'No grounded feature signals were returned.'}</p>
-      </div>
-    );
-  }
-
-  const summary =
-    explanation.summary ||
-    'The acoustic profile is consistent with the predicted class in the training corpus.';
-
-  return (
-    <div className="mini-card rationale-card">
-      <div className="mini-title">
-        <BrainCircuit size={16} /> Acoustic Rationale
-      </div>
-      <p className="rationale-summary">{summary}</p>
-      <p className="small-note disclaimer">{explanation.disclaimer}</p>
-    </div>
-  );
-}
-
 function MetricCard({ icon: Icon, label, value, sub }) {
   return (
     <Card>
@@ -546,8 +508,6 @@ export default function App() {
 
                   <div className="analysis-grid">
                     <div className="left-stack">
-                      <AcousticRationale explanation={active.explanation} />
-
                       <div className="two-col">
                         <div className="mini-card">
                           <div className="mini-title">

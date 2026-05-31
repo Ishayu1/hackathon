@@ -229,7 +229,6 @@ export function mapClassifyResponse(result, { sourceType = 'upload', audioUrl = 
       ? transcription.chunks.map((chunk) => Math.min(1, Math.max(0.05, (chunk.severity_score || 0) / 100)))
       : [],
     watch,
-    explanation: result.explanation,
     transcription,
     transcriptionTerms: terms,
     isTranscribing: !transcriptionAvailable,
