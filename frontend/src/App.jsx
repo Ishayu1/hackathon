@@ -46,10 +46,17 @@ function RiskPill({ risk }) {
 
 function AudioPlayer({ url, label = 'Play clip' }) {
   const audioRef = useRef(null);
+  const progressRef = useRef(null);
   const [playing, setPlaying] = useState(false);
+  const [duration, setDuration] = useState(0);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [waveformBars, setWaveformBars] = useState([]);
 
   useEffect(() => {
     setPlaying(false);
+    setDuration(0);
+    setCurrentTime(0);
+    setWaveformBars([]);
     if (audioRef.current) {
       audioRef.current.pause();
       audioRef.current.currentTime = 0;
@@ -63,17 +70,90 @@ function AudioPlayer({ url, label = 'Play clip' }) {
     const onEnded = () => setPlaying(false);
     const onPause = () => setPlaying(false);
     const onPlay = () => setPlaying(true);
+    const onLoadedMetadata = () => setDuration(Number.isFinite(audio.duration) ? audio.duration : 0);
+    const onTimeUpdate = () => setCurrentTime(audio.currentTime || 0);
 
     audio.addEventListener('ended', onEnded);
     audio.addEventListener('pause', onPause);
     audio.addEventListener('play', onPlay);
+    audio.addEventListener('loadedmetadata', onLoadedMetadata);
+    audio.addEventListener('timeupdate', onTimeUpdate);
 
     return () => {
       audio.removeEventListener('ended', onEnded);
       audio.removeEventListener('pause', onPause);
       audio.removeEventListener('play', onPlay);
+      audio.removeEventListener('loadedmetadata', onLoadedMetadata);
+      audio.removeEventListener('timeupdate', onTimeUpdate);
     };
   }, [url]);
+
+  useEffect(() => {
+    if (!url) {
+      return undefined;
+    }
+
+    let cancelled = false;
+    const context = new (window.AudioContext || window.webkitAudioContext)();
+
+    async function buildWaveform() {
+      try {
+        const response = await fetch(url);
+        const audioBuffer = await response.arrayBuffer();
+        const decoded = await context.decodeAudioData(audioBuffer);
+        if (cancelled) return;
+
+        const data = decoded.getChannelData(0);
+        const bars = 72;
+        const samplesPerBar = Math.max(1, Math.floor(data.length / bars));
+        const nextBars = [];
+
+        for (let index = 0; index < bars; index += 1) {
+          const start = index * samplesPerBar;
+          const end = Math.min(data.length, start + samplesPerBar);
+          let peak = 0;
+          for (let sample = start; sample < end; sample += 1) {
+            const amplitude = Math.abs(data[sample]);
+            if (amplitude > peak) peak = amplitude;
+          }
+          nextBars.push(peak);
+        }
+
+        const maxPeak = Math.max(...nextBars, 0.01);
+        const normalized = nextBars.map((value) => Math.max(0.08, value / maxPeak));
+        setWaveformBars(normalized);
+      } catch {
+        setWaveformBars([]);
+      }
+    }
+
+    buildWaveform();
+    return () => {
+      cancelled = true;
+      context.close().catch(() => {});
+    };
+  }, [url]);
+
+  const formatTime = (seconds) => {
+    if (!Number.isFinite(seconds) || seconds <= 0) return '0:00';
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${mins}:${String(secs).padStart(2, '0')}`;
+  };
+
+  const seekToPosition = (clientX) => {
+    const audio = audioRef.current;
+    const progress = progressRef.current;
+    if (!audio || !progress || !duration) return;
+
+    const rect = progress.getBoundingClientRect();
+    const clampedX = Math.min(rect.right, Math.max(rect.left, clientX));
+    const ratio = (clampedX - rect.left) / rect.width;
+    audio.currentTime = ratio * duration;
+    setCurrentTime(audio.currentTime);
+  };
+
+  const progressRatio = duration > 0 ? Math.min(1, currentTime / duration) : 0;
 
   if (!url) return null;
 
@@ -91,10 +171,51 @@ function AudioPlayer({ url, label = 'Play clip' }) {
   return (
     <div className="audio-player">
       <audio ref={audioRef} src={url} preload="metadata" />
-      <Button type="button" variant="outline" className="audio-play-btn" onClick={togglePlayback}>
-        {playing ? <Pause size={16} /> : <Play size={16} />}
-        {playing ? 'Pause' : label}
-      </Button>
+      <div className="audio-player-controls">
+        <Button type="button" variant="outline" className="audio-play-btn" onClick={togglePlayback}>
+          {playing ? <Pause size={16} /> : <Play size={16} />}
+          {playing ? 'Pause' : label}
+        </Button>
+        <span className="audio-time">
+          {formatTime(currentTime)} / {formatTime(duration)}
+        </span>
+      </div>
+      <div
+        ref={progressRef}
+        className="waveform-track"
+        role="slider"
+        aria-label="Audio timeline"
+        aria-valuemin={0}
+        aria-valuemax={Math.round(duration)}
+        aria-valuenow={Math.round(currentTime)}
+        tabIndex={0}
+        onClick={(event) => seekToPosition(event.clientX)}
+        onKeyDown={(event) => {
+          const audio = audioRef.current;
+          if (!audio || !duration) return;
+          if (event.key === 'ArrowRight') {
+            audio.currentTime = Math.min(duration, audio.currentTime + 2);
+            setCurrentTime(audio.currentTime);
+          } else if (event.key === 'ArrowLeft') {
+            audio.currentTime = Math.max(0, audio.currentTime - 2);
+            setCurrentTime(audio.currentTime);
+          }
+        }}
+      >
+        <div className="waveform-bars" aria-hidden="true">
+          {(waveformBars.length ? waveformBars : new Array(72).fill(0.22)).map((bar, index) => {
+            const active = index / 72 <= progressRatio;
+            return (
+              <span
+                key={`${index}-${bar}`}
+                className={`waveform-bar ${active ? 'active' : ''}`}
+                style={{ height: `${Math.round(14 + bar * 38)}px` }}
+              />
+            );
+          })}
+        </div>
+        <div className="waveform-progress" style={{ width: `${progressRatio * 100}%` }} />
+      </div>
     </div>
   );
 }
