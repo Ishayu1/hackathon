@@ -90,4 +90,4 @@ if __name__ == "__main__":
         
     except FileNotFoundError as e:
         print(f"Execution Error: {e}")
-        print("Ensure 'duress_model_weights.pth' exists and the audio path is correct.")
+        print("Ensure 'temporal_bilstm_duress.pth' exists and the audio path is correct.")
