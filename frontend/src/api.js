@@ -64,7 +64,8 @@ function mapDuressFields(duress) {
     };
   }
 
-  const duressScore = Math.min(1, Math.max(0, duress.probability ?? 0));
+  const rawScore = Math.min(1, Math.max(0, duress.probability ?? 0));
+  const duressScore = Math.pow(rawScore, 2);
   return {
     duressAvailable: true,
     duressLabel: duress.is_duress ? 'Duress Detected' : 'Normal Tone',
