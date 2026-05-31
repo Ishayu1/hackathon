@@ -38,7 +38,7 @@ class Wav2Vec2BiLSTMClassifier(nn.Module):
 # =====================================================================
 # 2. Inference & Probability Extraction
 # =====================================================================
-def analyze_duress_probability(audio_path, model_weights_path="duress_model_weights.pth", target_sample_rate=16000):
+def analyze_duress_probability(audio_path, model_weights_path="temporal_bilstm_duress.pth", target_sample_rate=16000):
     """
     Loads a saved model, processes a raw audio file, and outputs the 
     percentage probability that the audio belongs to the 'Duress' class.
@@ -80,7 +80,7 @@ def analyze_duress_probability(audio_path, model_weights_path="duress_model_weig
 
 if __name__ == "__main__":
     test_audio_file = "live_recording.wav"
-    weights_file = "duress_model_weights.pth"
+    weights_file = "temporal_bilstm_duress.pth"
     
     try:
         duress_chance = analyze_duress_probability(test_audio_file, weights_file)
