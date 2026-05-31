@@ -30,7 +30,7 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-First Spectra run downloads ~2.5 GB (model weights + Wav2Vec2 encoder). The default **fast** backend uses pre-trained `.joblib` artifacts in `results/` and does not require this download.
+The default **Spectra** backend downloads ~2.5 GB on first run (model weights + Wav2Vec2 encoder). The optional **fast** backend uses pre-trained `.joblib` artifacts in `results/` and does not require this download.
 
 Place duress weights at project root (optional but recommended):
 
@@ -41,7 +41,7 @@ temporal_bilstm_duress.pth
 ### 2. Start the API
 
 ```bash
-# Default: demo-tuned fast RBF (~7 ms, 99% on demo dataset)
+# Default: Spectra-AASIST3 neural backend (~190 ms, best ASVspoof accuracy)
 uvicorn api.main:app --host 127.0.0.1 --port 8000
 ```
 
@@ -71,7 +71,7 @@ Environment variables (set before `uvicorn`):
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `MODEL_BACKEND` | `fast` | `fast` or `spectra` |
+| `MODEL_BACKEND` | `spectra` | `spectra` or `fast` |
 | `FAST_MODEL_PATH` | demo `.joblib` if present | Override fast model artifact |
 | `FAST_PROFILE_PATH` | `results/fast_demo_feature_profiles.json` | XAI feature profiles |
 | `SPECTRA_DECISION` | `argmax` | `argmax` or `threshold` (spectra only) |
@@ -87,12 +87,15 @@ Environment variables (set before `uvicorn`):
 **Examples:**
 
 ```bash
-# Spectra neural backend (best ASVspoof accuracy)
-MODEL_BACKEND=spectra SPECTRA_DECISION=argmax uvicorn api.main:app --host 0.0.0.0 --port 8000
+# Fast classical fallback (~7 ms; set MODEL_BACKEND=fast to skip Spectra download)
+MODEL_BACKEND=fast uvicorn api.main:app --host 0.0.0.0 --port 8000
 
 # ASVspoof-trained fast model instead of demo-tuned
 FAST_MODEL_PATH=results/fast_baseline_mfcc_rbf_svc.joblib \
 MODEL_BACKEND=fast uvicorn api.main:app --host 0.0.0.0 --port 8000
+
+# Override Spectra decision mode (default is argmax)
+SPECTRA_DECISION=threshold uvicorn api.main:app --host 0.0.0.0 --port 8000
 
 # Remote frontend
 VITE_API_BASE=http://your-host:8000 npm run dev
@@ -186,7 +189,7 @@ python scripts/eval_demo_dataset.py
 | Fast RBF (ASVspoof-trained) | 47.7% | ~7 ms |
 | **Fast RBF (demo-trained)** | **99.0%** | **~7 ms** |
 
-**Hackathon recommendation:** use **fast demo RBF** for live uploads (speed + domain match). Cite Spectra **0.723% EER on ASVspoof** for accuracy narrative.
+**Hackathon recommendation:** Spectra is the default for best ASVspoof accuracy (**0.723% EER**). For live uploads on the Gary Stafford demo dataset where speed matters, switch to **fast demo RBF** with `MODEL_BACKEND=fast` (99% demo accuracy, ~7 ms).
 
 Artifacts:
 - Demo model: `results/fast_baseline_mfcc_rbf_svc_demo.joblib`

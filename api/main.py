@@ -38,7 +38,7 @@ _profiles = None
 _transcriber = None
 _transcriber_error = None
 _transcriber_lock = threading.Lock()
-_backend = os.getenv("MODEL_BACKEND", "fast").strip().lower()
+_backend = os.getenv("MODEL_BACKEND", "spectra").strip().lower()
 _fast_model_path = os.getenv(
     "FAST_MODEL_PATH",
     str(DEFAULT_DEMO_FAST_MODEL if DEFAULT_DEMO_FAST_MODEL.exists() else DEFAULT_FAST_MODEL),
