@@ -1,5 +1,4 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { motion } from 'framer-motion';
 import {
   AlertTriangle,
   AudioWaveform,
@@ -13,10 +12,8 @@ import {
   Play,
   Radar,
   ShieldAlert,
-  ShieldCheck,
   Square,
-  Upload,
-  Zap
+  Upload
 } from 'lucide-react';
 import {
   applyTranscriptionResult,
@@ -44,22 +41,161 @@ function RiskPill({ risk }) {
   return <span className={`risk-pill risk-${risk.toLowerCase()}`}>{risk}</span>;
 }
 
+const WAVEFORM_HEIGHT = 56;
+const WAVEFORM_MIN_BARS = 120;
+const WAVEFORM_MAX_BARS = 480;
+
+function formatAudioTime(seconds) {
+  if (!Number.isFinite(seconds) || seconds < 0) return '0:00';
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.floor(seconds % 60);
+  return `${mins}:${String(secs).padStart(2, '0')}`;
+}
+
+function computePeaks(channelData, barCount) {
+  const samplesPerBar = Math.max(1, Math.floor(channelData.length / barCount));
+  const peaks = new Float32Array(barCount);
+  let maxPeak = 0.01;
+
+  for (let index = 0; index < barCount; index += 1) {
+    const start = index * samplesPerBar;
+    const end = Math.min(channelData.length, start + samplesPerBar);
+    let peak = 0;
+    for (let sample = start; sample < end; sample += 1) {
+      const amplitude = Math.abs(channelData[sample]);
+      if (amplitude > peak) peak = amplitude;
+    }
+    peaks[index] = peak;
+    if (peak > maxPeak) maxPeak = peak;
+  }
+
+  for (let index = 0; index < barCount; index += 1) {
+    peaks[index] = Math.max(0.08, peaks[index] / maxPeak);
+  }
+
+  return peaks;
+}
+
+function drawWaveformCanvas(ctx, peaks, width, height) {
+  const barCount = peaks.length;
+  const gap = 1;
+  const barWidth = Math.max(1, (width - gap * (barCount - 1)) / barCount);
+  const centerY = height / 2;
+
+  ctx.clearRect(0, 0, width, height);
+
+  for (let index = 0; index < barCount; index += 1) {
+    const barHeight = Math.max(4, peaks[index] * (height - 8));
+    const x = index * (barWidth + gap);
+    const y = centerY - barHeight / 2;
+    const radius = Math.min(barWidth / 2, barHeight / 2);
+    ctx.fillStyle = 'rgba(148, 163, 184, 0.72)';
+    ctx.beginPath();
+    if (typeof ctx.roundRect === 'function') {
+      ctx.roundRect(x, y, barWidth, barHeight, radius);
+    } else {
+      ctx.rect(x, y, barWidth, barHeight);
+    }
+    ctx.fill();
+  }
+}
+
 function AudioPlayer({ url, label = 'Play clip' }) {
   const audioRef = useRef(null);
-  const progressRef = useRef(null);
+  const trackRef = useRef(null);
+  const canvasRef = useRef(null);
+  const playheadRef = useRef(null);
+  const peaksRef = useRef(null);
+  const durationRef = useRef(0);
+  const rafRef = useRef(null);
+  const draggingRef = useRef(false);
+  const lastLabelUpdateRef = useRef(0);
+
   const [playing, setPlaying] = useState(false);
   const [duration, setDuration] = useState(0);
-  const [currentTime, setCurrentTime] = useState(0);
-  const [waveformBars, setWaveformBars] = useState([]);
+  const [displayTime, setDisplayTime] = useState(0);
+  const [waveformReady, setWaveformReady] = useState(false);
+
+  const setPlayheadRatio = (ratio) => {
+    const clamped = Math.min(1, Math.max(0, ratio));
+    if (playheadRef.current) {
+      playheadRef.current.style.left = `${clamped * 100}%`;
+    }
+  };
+
+  const syncDisplayTime = (seconds, force = false) => {
+    const now = performance.now();
+    if (!force && now - lastLabelUpdateRef.current < 120) return;
+    lastLabelUpdateRef.current = now;
+    setDisplayTime(seconds);
+  };
+
+  const seekFromClientX = (clientX) => {
+    const audio = audioRef.current;
+    const track = trackRef.current;
+    const trackDuration = durationRef.current;
+    if (!audio || !track || !trackDuration) return;
+
+    const rect = track.getBoundingClientRect();
+    const clampedX = Math.min(rect.right, Math.max(rect.left, clientX));
+    const ratio = (clampedX - rect.left) / rect.width;
+    audio.currentTime = ratio * trackDuration;
+    setPlayheadRatio(ratio);
+    syncDisplayTime(audio.currentTime, true);
+  };
+
+  const redrawWaveform = () => {
+    const canvas = canvasRef.current;
+    const track = trackRef.current;
+    const peaks = peaksRef.current;
+    if (!canvas || !track || !peaks?.length) return;
+
+    const width = Math.max(1, Math.floor(track.clientWidth));
+    const barCount = Math.min(
+      WAVEFORM_MAX_BARS,
+      Math.max(WAVEFORM_MIN_BARS, Math.floor(width / 2))
+    );
+
+    let drawPeaks = peaks;
+    if (peaks.length !== barCount) {
+      const resampled = new Float32Array(barCount);
+      const step = peaks.length / barCount;
+      for (let index = 0; index < barCount; index += 1) {
+        resampled[index] = peaks[Math.min(peaks.length - 1, Math.floor(index * step))];
+      }
+      drawPeaks = resampled;
+    }
+
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = Math.floor(width * dpr);
+    canvas.height = Math.floor(WAVEFORM_HEIGHT * dpr);
+    canvas.style.width = `${width}px`;
+    canvas.style.height = `${WAVEFORM_HEIGHT}px`;
+
+    const ctx = canvas.getContext('2d');
+    if (ctx) {
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      drawWaveformCanvas(ctx, drawPeaks, width, WAVEFORM_HEIGHT);
+    }
+  };
 
   useEffect(() => {
     setPlaying(false);
     setDuration(0);
-    setCurrentTime(0);
-    setWaveformBars([]);
+    setDisplayTime(0);
+    setWaveformReady(false);
+    peaksRef.current = null;
+    durationRef.current = 0;
+    setPlayheadRatio(0);
+
     if (audioRef.current) {
       audioRef.current.pause();
       audioRef.current.currentTime = 0;
+    }
+
+    if (rafRef.current) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
     }
   }, [url]);
 
@@ -67,31 +203,63 @@ function AudioPlayer({ url, label = 'Play clip' }) {
     const audio = audioRef.current;
     if (!audio) return undefined;
 
-    const onEnded = () => setPlaying(false);
-    const onPause = () => setPlaying(false);
+    const onEnded = () => {
+      setPlaying(false);
+      if (rafRef.current) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+      }
+    };
+    const onPause = () => {
+      setPlaying(false);
+      if (rafRef.current) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+      }
+      syncDisplayTime(audio.currentTime, true);
+    };
     const onPlay = () => setPlaying(true);
-    const onLoadedMetadata = () => setDuration(Number.isFinite(audio.duration) ? audio.duration : 0);
-    const onTimeUpdate = () => setCurrentTime(audio.currentTime || 0);
+    const onLoadedMetadata = () => {
+      const nextDuration = Number.isFinite(audio.duration) ? audio.duration : 0;
+      durationRef.current = nextDuration;
+      setDuration(nextDuration);
+    };
 
     audio.addEventListener('ended', onEnded);
     audio.addEventListener('pause', onPause);
     audio.addEventListener('play', onPlay);
     audio.addEventListener('loadedmetadata', onLoadedMetadata);
-    audio.addEventListener('timeupdate', onTimeUpdate);
 
     return () => {
       audio.removeEventListener('ended', onEnded);
       audio.removeEventListener('pause', onPause);
       audio.removeEventListener('play', onPlay);
       audio.removeEventListener('loadedmetadata', onLoadedMetadata);
-      audio.removeEventListener('timeupdate', onTimeUpdate);
     };
   }, [url]);
 
   useEffect(() => {
-    if (!url) {
-      return undefined;
-    }
+    if (!playing) return undefined;
+
+    const tick = () => {
+      const audio = audioRef.current;
+      if (audio && !draggingRef.current && durationRef.current > 0) {
+        const ratio = audio.currentTime / durationRef.current;
+        setPlayheadRatio(ratio);
+        syncDisplayTime(audio.currentTime);
+      }
+      rafRef.current = requestAnimationFrame(tick);
+    };
+
+    rafRef.current = requestAnimationFrame(tick);
+    return () => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+    };
+  }, [playing]);
+
+  useEffect(() => {
+    if (!url) return undefined;
 
     let cancelled = false;
     const context = new (window.AudioContext || window.webkitAudioContext)();
@@ -103,27 +271,12 @@ function AudioPlayer({ url, label = 'Play clip' }) {
         const decoded = await context.decodeAudioData(audioBuffer);
         if (cancelled) return;
 
-        const data = decoded.getChannelData(0);
-        const bars = 72;
-        const samplesPerBar = Math.max(1, Math.floor(data.length / bars));
-        const nextBars = [];
-
-        for (let index = 0; index < bars; index += 1) {
-          const start = index * samplesPerBar;
-          const end = Math.min(data.length, start + samplesPerBar);
-          let peak = 0;
-          for (let sample = start; sample < end; sample += 1) {
-            const amplitude = Math.abs(data[sample]);
-            if (amplitude > peak) peak = amplitude;
-          }
-          nextBars.push(peak);
-        }
-
-        const maxPeak = Math.max(...nextBars, 0.01);
-        const normalized = nextBars.map((value) => Math.max(0.08, value / maxPeak));
-        setWaveformBars(normalized);
+        peaksRef.current = computePeaks(decoded.getChannelData(0), WAVEFORM_MAX_BARS);
+        setWaveformReady(true);
+        requestAnimationFrame(() => redrawWaveform());
       } catch {
-        setWaveformBars([]);
+        peaksRef.current = null;
+        setWaveformReady(false);
       }
     }
 
@@ -134,26 +287,40 @@ function AudioPlayer({ url, label = 'Play clip' }) {
     };
   }, [url]);
 
-  const formatTime = (seconds) => {
-    if (!Number.isFinite(seconds) || seconds <= 0) return '0:00';
-    const mins = Math.floor(seconds / 60);
-    const secs = Math.floor(seconds % 60);
-    return `${mins}:${String(secs).padStart(2, '0')}`;
-  };
+  useEffect(() => {
+    const track = trackRef.current;
+    if (!track || !waveformReady) return undefined;
 
-  const seekToPosition = (clientX) => {
-    const audio = audioRef.current;
-    const progress = progressRef.current;
-    if (!audio || !progress || !duration) return;
+    const observer = new ResizeObserver(() => {
+      requestAnimationFrame(redrawWaveform);
+    });
+    observer.observe(track);
+    return () => observer.disconnect();
+  }, [url, waveformReady]);
 
-    const rect = progress.getBoundingClientRect();
-    const clampedX = Math.min(rect.right, Math.max(rect.left, clientX));
-    const ratio = (clampedX - rect.left) / rect.width;
-    audio.currentTime = ratio * duration;
-    setCurrentTime(audio.currentTime);
-  };
+  useEffect(() => {
+    const onPointerMove = (event) => {
+      if (!draggingRef.current) return;
+      seekFromClientX(event.clientX);
+    };
 
-  const progressRatio = duration > 0 ? Math.min(1, currentTime / duration) : 0;
+    const onPointerUp = () => {
+      if (!draggingRef.current) return;
+      draggingRef.current = false;
+      document.body.classList.remove('waveform-dragging');
+    };
+
+    window.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('pointerup', onPointerUp);
+    window.addEventListener('pointercancel', onPointerUp);
+
+    return () => {
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerup', onPointerUp);
+      window.removeEventListener('pointercancel', onPointerUp);
+      document.body.classList.remove('waveform-dragging');
+    };
+  }, []);
 
   if (!url) return null;
 
@@ -168,6 +335,14 @@ function AudioPlayer({ url, label = 'Play clip' }) {
     }
   };
 
+  const startDrag = (event) => {
+    if (!durationRef.current) return;
+    draggingRef.current = true;
+    document.body.classList.add('waveform-dragging');
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    seekFromClientX(event.clientX);
+  };
+
   return (
     <div className="audio-player">
       <audio ref={audioRef} src={url} preload="metadata" />
@@ -177,44 +352,39 @@ function AudioPlayer({ url, label = 'Play clip' }) {
           {playing ? 'Pause' : label}
         </Button>
         <span className="audio-time">
-          {formatTime(currentTime)} / {formatTime(duration)}
+          {formatAudioTime(displayTime)} / {formatAudioTime(duration)}
         </span>
       </div>
       <div
-        ref={progressRef}
+        ref={trackRef}
         className="waveform-track"
         role="slider"
         aria-label="Audio timeline"
         aria-valuemin={0}
         aria-valuemax={Math.round(duration)}
-        aria-valuenow={Math.round(currentTime)}
+        aria-valuenow={Math.round(displayTime)}
         tabIndex={0}
-        onClick={(event) => seekToPosition(event.clientX)}
+        onPointerDown={startDrag}
         onKeyDown={(event) => {
           const audio = audioRef.current;
-          if (!audio || !duration) return;
+          const trackDuration = durationRef.current;
+          if (!audio || !trackDuration) return;
           if (event.key === 'ArrowRight') {
-            audio.currentTime = Math.min(duration, audio.currentTime + 2);
-            setCurrentTime(audio.currentTime);
+            audio.currentTime = Math.min(trackDuration, audio.currentTime + 1);
+            setPlayheadRatio(audio.currentTime / trackDuration);
+            syncDisplayTime(audio.currentTime, true);
           } else if (event.key === 'ArrowLeft') {
-            audio.currentTime = Math.max(0, audio.currentTime - 2);
-            setCurrentTime(audio.currentTime);
+            audio.currentTime = Math.max(0, audio.currentTime - 1);
+            setPlayheadRatio(audio.currentTime / trackDuration);
+            syncDisplayTime(audio.currentTime, true);
           }
         }}
       >
-        <div className="waveform-bars" aria-hidden="true">
-          {(waveformBars.length ? waveformBars : new Array(72).fill(0.22)).map((bar, index) => {
-            const active = index / 72 <= progressRatio;
-            return (
-              <span
-                key={`${index}-${bar}`}
-                className={`waveform-bar ${active ? 'active' : ''}`}
-                style={{ height: `${Math.round(14 + bar * 38)}px` }}
-              />
-            );
-          })}
+        <canvas ref={canvasRef} className="waveform-canvas" aria-hidden="true" />
+        <div ref={playheadRef} className="waveform-playhead" aria-hidden="true">
+          <div className="waveform-playhead-line" />
+          <div className="waveform-playhead-knob" />
         </div>
-        <div className="waveform-progress" style={{ width: `${progressRatio * 100}%` }} />
       </div>
     </div>
   );
@@ -477,9 +647,6 @@ export default function App() {
 
   const isBusy = isUploading || isRecording;
 
-  const fakeScore = active
-    ? Math.round((active.spoofScore ?? active.syntheticScore ?? active.confidence) * 100)
-    : 0;
   const duressScore = active?.duressAvailable
     ? active.duressPercent ?? Math.round((active.duressScore ?? 0) * 100)
     : null;
@@ -488,10 +655,6 @@ export default function App() {
       ? Math.round((active.confidence ?? 1 - (active.spoofScore ?? 0)) * 100)
       : Math.round((active.confidence ?? active.spoofScore ?? 0) * 100)
     : 0;
-
-  const systemRecommendation =
-    active?.systemRecommendation ||
-    (active?.risk === 'LOW' ? 'TRUST' : active?.risk === 'HIGH' ? 'VERIFY' : 'ESCALATE');
 
   const backendLabel = backendHealth?.model_loaded
     ? `${backendHealth.backend} · ${backendHealth.device}`
@@ -612,109 +775,53 @@ export default function App() {
 
                 <Card className="analysis-card">
                   <div className="analysis-head">
-                    <div>
-                      <div className="analysis-eyebrow">
-                        <AudioWaveform size={18} /> Analysis Results
+                    <div className="analysis-head-top">
+                      <div>
+                        <div className="analysis-eyebrow">
+                          <AudioWaveform size={18} /> Analysis Results
+                        </div>
+                        <h2>{active.title}</h2>
                       </div>
-                      <h2>{active.title}</h2>
-                      {active.audioUrl && (
-                        <AudioPlayer
-                          url={active.audioUrl}
-                          label={active.source === 'record' ? 'Play recording' : 'Play clip'}
-                        />
-                      )}
+                      <RiskPill risk={active.risk} />
                     </div>
-                    <RiskPill risk={active.risk} />
+                    {active.audioUrl && (
+                      <AudioPlayer
+                        url={active.audioUrl}
+                        label={active.source === 'record' ? 'Play recording' : 'Play clip'}
+                      />
+                    )}
                   </div>
 
-                  <div className="analysis-grid">
-                    <div className="left-stack">
-                      <div className="two-col">
-                        <div className="mini-card">
-                          <div className="mini-title">
-                            <Zap size={16} /> Authenticity
-                          </div>
-                          <div className="score-row">
-                            <div className="score-value">{fakeScore}%</div>
-                            <div className="score-meta">synthetic score</div>
-                          </div>
-                          <div className="progress-bg">
-                            <motion.div
-                              key={`${active.id}-spoof`}
-                              initial={{ width: 0 }}
-                              animate={{ width: `${fakeScore}%` }}
-                              className="progress-fill"
-                            />
-                          </div>
-                        </div>
-
-                        <div className={`mini-card ${active.isDuress ? 'duress-alert' : ''}`}>
-                          <div className="mini-title">
-                            <HeartPulse size={16} /> Acoustic Duress
-                          </div>
-                          {active.duressAvailable === false ? (
-                            <p className="small-note">
-                              {active.duressError || 'Duress model unavailable. Place temporal_bilstm_duress.pth in the project root.'}
-                            </p>
-                          ) : (
-                            <>
-                              <div className="score-row">
-                                <div className="score-value">{duressScore ?? 0}%</div>
-                                <div className="score-meta">{active.duressLabel || 'Pending analysis'}</div>
-                              </div>
-                              <div className="progress-bg">
-                                <motion.div
-                                  key={`${active.id}-duress`}
-                                  initial={{ width: 0 }}
-                                  animate={{ width: `${duressScore ?? 0}%` }}
-                                  className={`progress-fill ${active.isDuress ? 'progress-duress' : 'progress-calm'}`}
-                                />
-                              </div>
-                            </>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="right-stack">
-                      <div className="mini-card">
-                        <div className="label">Transcript</div>
-                        {parseWatchlistKeywords(watchlist).length > 0 &&
-                        !active.isTranscribing &&
-                        !active.transcript.startsWith('Transcription') ? (
-                          <HighlightedTranscript text={active.transcript} watchlist={watchlist} />
-                        ) : (
-                          <p className="quote">“{active.transcript}”</p>
-                        )}
-                        {active.isTranscribing && (
-                          <p className="small-note">Authenticity is ready. Transcription is still running.</p>
-                        )}
-                      </div>
-
-                      {watchlist.trim() && (
-                        <div className="mini-card">
-                          <div className="label">Watchlist Matches</div>
-                          <div className="chips">
-                            {active.watch.length === 0 && (
-                              <span className="chip muted-chip">No matches in transcript</span>
-                            )}
-                            {active.watch.map((term) => (
-                              <span key={term} className="chip">
-                                {term}
-                              </span>
-                            ))}
-                          </div>
-                        </div>
+                  <div className="analysis-details">
+                    <div className="mini-card">
+                      <div className="label">Transcript</div>
+                      {parseWatchlistKeywords(watchlist).length > 0 &&
+                      !active.isTranscribing &&
+                      !active.transcript.startsWith('Transcription') ? (
+                        <HighlightedTranscript text={active.transcript} watchlist={watchlist} />
+                      ) : (
+                        <p className="quote">“{active.transcript}”</p>
                       )}
-
-                      <div className="mini-card alert">
-                        <div className="mini-title">
-                          {active.risk === 'LOW' ? <ShieldCheck size={18} /> : <AlertTriangle size={18} />}
-                          Recommendation · {systemRecommendation}
-                        </div>
-                        <p className="small-note">{active.recommendation}</p>
-                      </div>
+                      {active.isTranscribing && (
+                        <p className="small-note">Authenticity is ready. Transcription is still running.</p>
+                      )}
                     </div>
+
+                    {watchlist.trim() && (
+                      <div className="mini-card">
+                        <div className="label">Watchlist Matches</div>
+                        <div className="chips">
+                          {active.watch.length === 0 && (
+                            <span className="chip muted-chip">No matches in transcript</span>
+                          )}
+                          {active.watch.map((term) => (
+                            <span key={term} className="chip">
+                              {term}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </Card>
               </>

@@ -354,6 +354,13 @@ body {
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
   background: linear-gradient(90deg, rgba(6, 182, 212, 0.12), rgba(217, 70, 239, 0.12), rgba(239, 68, 68, 0.12));
   display: flex;
+  flex-direction: column;
+  gap: 14px;
+  align-items: stretch;
+}
+
+.analysis-head-top {
+  display: flex;
   justify-content: space-between;
   gap: 12px;
   align-items: center;
@@ -404,6 +411,12 @@ body {
   display: grid;
   gap: 20px;
   grid-template-columns: 1.1fr 0.9fr;
+  padding: 20px;
+}
+
+.analysis-details {
+  display: grid;
+  gap: 16px;
   padding: 20px;
 }
 
@@ -613,7 +626,7 @@ body {
 }
 
 .audio-player {
-  margin-top: 12px;
+  width: 100%;
   border-radius: 14px;
   border: 1px solid rgba(255, 255, 255, 0.16);
   background: rgba(2, 6, 23, 0.6);
@@ -641,12 +654,16 @@ body {
 .waveform-track {
   position: relative;
   margin-top: 10px;
+  width: 100%;
+  min-height: 72px;
   border-radius: 10px;
   border: 1px solid rgba(148, 163, 184, 0.35);
   background: linear-gradient(180deg, rgba(30, 41, 59, 0.7), rgba(15, 23, 42, 0.8));
-  padding: 8px;
+  padding: 8px 10px;
   overflow: hidden;
   cursor: pointer;
+  touch-action: none;
+  user-select: none;
 }
 
 .waveform-track:focus-visible {
@@ -654,34 +671,54 @@ body {
   outline-offset: 1px;
 }
 
-.waveform-bars {
-  position: relative;
-  z-index: 2;
-  height: 54px;
-  display: grid;
-  grid-template-columns: repeat(72, 1fr);
-  align-items: center;
-  gap: 2px;
-}
-
-.waveform-bar {
+.waveform-canvas {
+  display: block;
   width: 100%;
-  border-radius: 999px;
-  align-self: center;
-  background: rgba(148, 163, 184, 0.62);
-  transition: background 120ms ease;
-}
-
-.waveform-bar.active {
-  background: rgba(103, 232, 249, 0.95);
-}
-
-.waveform-progress {
-  position: absolute;
-  inset: 0 auto 0 0;
-  z-index: 1;
-  background: linear-gradient(90deg, rgba(34, 211, 238, 0.2), rgba(232, 121, 249, 0.18));
+  height: 56px;
   pointer-events: none;
+}
+
+.waveform-playhead {
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  left: 0;
+  width: 0;
+  z-index: 3;
+  pointer-events: none;
+  will-change: left;
+}
+
+.waveform-playhead-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 2px;
+  transform: translateX(-50%);
+  background: #67e8f9;
+  box-shadow: 0 0 10px rgba(103, 232, 249, 0.85);
+}
+
+.waveform-playhead-knob {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 12px;
+  height: 12px;
+  transform: translate(-50%, -50%);
+  border-radius: 999px;
+  border: 2px solid #cffafe;
+  background: #22d3ee;
+  box-shadow: 0 0 12px rgba(34, 211, 238, 0.7);
+}
+
+body.waveform-dragging {
+  cursor: grabbing;
+}
+
+body.waveform-dragging .waveform-track {
+  cursor: grabbing;
 }
 
 .btn-recording {
