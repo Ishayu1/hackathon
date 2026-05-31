@@ -132,9 +132,35 @@ MODEL_BACKEND=fast uvicorn api.main:app --host 0.0.0.0 --port 8000
 curl -X POST http://localhost:8000/classify -F "file=@sample.wav"
 ```
 
+## Out-of-domain test clips
+
+Download held-out evaluation sets **not used in demo training** for manual upload testing:
+
+```bash
+# ASVspoof 2019 LA validation subset (~100 clips, fast if cached)
+python scripts/download_ood_testsets.py --skip-itw --per-class 50
+
+# In-The-Wild (~8 GB zip; re-run without --skip-itw when download completes)
+python scripts/download_ood_testsets.py --per-class 50
+
+# Batch eval demo model on OOD manifests
+python scripts/eval_ood_testsets.py
+```
+
+Clips land in:
+- `data/ood/asvspoof19-la/{real,fake}/` — lab vocoder/TTS attacks (ASVspoof)
+- `data/ood/in-the-wild/{real,fake}/` — celebrity/politician deepfakes (in-the-wild)
+
+If OOD accuracy is poor, train a pooled model on demo + ASVspoof:
+
+```bash
+python scripts/train_pooled_rbf.py
+python scripts/eval_ood_testsets.py  # after pointing --model-path to pooled joblib
+```
+
 ## Fast Baseline Explainability
 
-For `MODEL_BACKEND=fast`, `/classify` includes an `explanation` object generated from the same 88 MFCC/LFCC and spectral features used by the classifier. The method compares the uploaded clip's feature values with bonafide and spoof class profiles computed from the Gary Stafford demo train split only (`scripts/build_feature_profiles.py`). Top signals are ranked by which class profile they are closer to and are phrased as corpus similarity, not causal proof. Spectra/Wav2Vec2 responses return `explanation: null`; MFCC explanations are not claimed for that backend. Rebuild profiles with:
+For `MODEL_BACKEND=fast`, `/classify` includes an `explanation` object generated from the same 88 MFCC/LFCC and spectral features used by the classifier. The method compares the uploaded clip's feature values with bonafide and spoof class profiles computed from the Gary Stafford demo train split only (`scripts/build_feature_profiles.py`). The API returns a short `summary` (2 sentences) citing the top supporting measurements, phrased as corpus similarity rather than causal proof. Spectra/Wav2Vec2 responses return `explanation: null`; MFCC explanations are not claimed for that backend. Rebuild profiles with:
 
 ```bash
 python scripts/build_feature_profiles.py

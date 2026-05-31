@@ -1,0 +1,11 @@
+{
+  "model_path": "/Users/ishayughosh/Downloads/Desktop (local)/Hackathon/results/fast_baseline_mfcc_rbf_svc_pooled.joblib",
+  "profile_path": "/Users/ishayughosh/Downloads/Desktop (local)/Hackathon/results/fast_pooled_feature_profiles.json",
+  "train_ms": 2199.3136669989326,
+  "n_pooled": 4500,
+  "demo_holdout": {
+    "accuracy": 0.9652406417112299,
+    "eer_percent": 3.7433155080213902,
+    "n": 374
+  }
+}

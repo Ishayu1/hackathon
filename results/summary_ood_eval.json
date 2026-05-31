@@ -1,0 +1,151 @@
+{
+  "model": "results/fast_baseline_mfcc_rbf_svc_pooled.joblib",
+  "results": [
+    {
+      "dataset": "Bisher/ASVspoof_2019_LA",
+      "n": 100,
+      "accuracy": 0.76,
+      "n_real": 50,
+      "n_fake": 50,
+      "fake_called_real": 1,
+      "real_called_fake": 23,
+      "fake_as_real_rate": 0.02,
+      "latency_ms_p50": 5.133499500516336,
+      "errors": [
+        {
+          "path": "data/ood/asvspoof19-la/real/real_0011.flac",
+          "label": "real",
+          "predicted": "spoof",
+          "confidence": 0.8513767648661354
+        },
+        {
+          "path": "data/ood/asvspoof19-la/real/real_0019.flac",
+          "label": "real",
+          "predicted": "spoof",
+          "confidence": 0.8117388977950458
+        },
+        {
+          "path": "data/ood/asvspoof19-la/real/real_0020.flac",
+          "label": "real",
+          "predicted": "spoof",
+          "confidence": 0.9335376860635133
+        },
+        {
+          "path": "data/ood/asvspoof19-la/real/real_0034.flac",
+          "label": "real",
+          "predicted": "spoof",
+          "confidence": 0.777346823888444
+        },
+        {
+          "path": "data/ood/asvspoof19-la/real/real_0036.flac",
+          "label": "real",
+          "predicted": "spoof",
+          "confidence": 0.9795843427307659
+        },
+        {
+          "path": "data/ood/asvspoof19-la/real/real_0041.flac",
+          "label": "real",
+          "predicted": "spoof",
+          "confidence": 0.7653749787553984
+        },
+        {
+          "path": "data/ood/asvspoof19-la/real/real_0042.flac",
+          "label": "real",
+          "predicted": "spoof",
+          "confidence": 0.9915522263224673
+        },
+        {
+          "path": "data/ood/asvspoof19-la/real/real_0045.flac",
+          "label": "real",
+          "predicted": "spoof",
+          "confidence": 0.5910068265246133
+        },
+        {
+          "path": "data/ood/asvspoof19-la/real/real_0049.flac",
+          "label": "real",
+          "predicted": "spoof",
+          "confidence": 0.5148551667756107
+        },
+        {
+          "path": "data/ood/asvspoof19-la/real/real_0052.flac",
+          "label": "real",
+          "predicted": "spoof",
+          "confidence": 0.8435882999764467
+        }
+      ]
+    },
+    {
+      "dataset": "mueller91/In-The-Wild",
+      "n": 100,
+      "accuracy": 0.61,
+      "n_real": 50,
+      "n_fake": 50,
+      "fake_called_real": 25,
+      "real_called_fake": 14,
+      "fake_as_real_rate": 0.5,
+      "latency_ms_p50": 4.927624497213401,
+      "errors": [
+        {
+          "path": "data/ood/in-the-wild/real/real_0004.flac",
+          "label": "real",
+          "predicted": "spoof",
+          "confidence": 0.8983311216795555
+        },
+        {
+          "path": "data/ood/in-the-wild/real/real_0007.flac",
+          "label": "real",
+          "predicted": "spoof",
+          "confidence": 0.9721331239338321
+        },
+        {
+          "path": "data/ood/in-the-wild/real/real_0011.flac",
+          "label": "real",
+          "predicted": "spoof",
+          "confidence": 0.9087681951011645
+        },
+        {
+          "path": "data/ood/in-the-wild/real/real_0016.flac",
+          "label": "real",
+          "predicted": "spoof",
+          "confidence": 0.8926840009255798
+        },
+        {
+          "path": "data/ood/in-the-wild/real/real_0017.flac",
+          "label": "real",
+          "predicted": "spoof",
+          "confidence": 0.8546003598796028
+        },
+        {
+          "path": "data/ood/in-the-wild/real/real_0019.flac",
+          "label": "real",
+          "predicted": "spoof",
+          "confidence": 0.9810866497421105
+        },
+        {
+          "path": "data/ood/in-the-wild/real/real_0022.flac",
+          "label": "real",
+          "predicted": "spoof",
+          "confidence": 0.876695194231798
+        },
+        {
+          "path": "data/ood/in-the-wild/real/real_0025.flac",
+          "label": "real",
+          "predicted": "spoof",
+          "confidence": 0.9054872009406406
+        },
+        {
+          "path": "data/ood/in-the-wild/real/real_0035.flac",
+          "label": "real",
+          "predicted": "spoof",
+          "confidence": 0.9508720637190504
+        },
+        {
+          "path": "data/ood/in-the-wild/real/real_0039.flac",
+          "label": "real",
+          "predicted": "spoof",
+          "confidence": 0.7989291318586613
+        }
+      ]
+    }
+  ]
+}

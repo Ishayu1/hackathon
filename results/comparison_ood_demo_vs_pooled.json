@@ -1,0 +1,18 @@
+{
+  "demo_model": "results/fast_baseline_mfcc_rbf_svc_demo.joblib",
+  "pooled_model": "results/fast_baseline_mfcc_rbf_svc_pooled.joblib",
+  "asvspoof19_la_validation_ood": {
+    "n": 100,
+    "demo_model": {
+      "accuracy": 0.59,
+      "fake_called_real": 18,
+      "real_called_fake": 23
+    },
+    "pooled_model": {
+      "accuracy": 0.76,
+      "fake_called_real": 1,
+      "real_called_fake": 23
+    }
+  },
+  "note": "In-The-Wild download (~8 GB) runs via scripts/download_ood_testsets.py; re-run eval when manifest exists."
+}

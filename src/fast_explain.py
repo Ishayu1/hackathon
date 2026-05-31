@@ -43,12 +43,46 @@ def _round_float(value: float, digits: int = 4) -> float:
     return round(float(value), digits)
 
 
-def _relative_phrase(value: float, predicted_mean: float, predicted_label: FastLabel) -> str:
-    if value > predicted_mean:
-        return f"higher than the {predicted_label} training average"
-    if value < predicted_mean:
-        return f"lower than the {predicted_label} training average"
-    return f"near the {predicted_label} training average"
+def _trend_phrase(value: float, reference_mean: float) -> str:
+    if value > reference_mean * 1.001:
+        return "above"
+    if value < reference_mean * 0.999:
+        return "below"
+    return "near"
+
+
+def _format_signal_phrase(signal: dict[str, Any], prediction: FastLabel) -> str:
+    reference = signal["bonafide_reference"] if prediction == "bonafide" else signal["spoof_reference"]
+    class_word = "authentic" if prediction == "bonafide" else "synthetic"
+    trend = _trend_phrase(float(signal["value"]), float(reference["mean"]))
+    return (
+        f"{signal['label']} ({signal['value']}, {trend} the {class_word} training average "
+        f"of {reference['mean']})"
+    )
+
+
+def build_explanation_summary(prediction: FastLabel, top_signals: list[dict[str, Any]]) -> str:
+    """Turn ranked feature signals into a short multi-sentence rationale."""
+    if not top_signals:
+        return ""
+
+    class_word = "authentic" if prediction == "bonafide" else "synthetic"
+    contra_word = "synthetic" if prediction == "bonafide" else "authentic"
+    phrases = [_format_signal_phrase(signal, prediction) for signal in top_signals[:3]]
+
+    intro = (
+        f"The classifier labeled this clip as {prediction} because its acoustic profile "
+        f"matches {class_word} training examples more closely than {contra_word} ones."
+    )
+
+    if len(phrases) == 1:
+        detail = f"The main supporting measurement is {phrases[0]}."
+    elif len(phrases) == 2:
+        detail = f"Supporting measurements include {phrases[0]} and {phrases[1]}."
+    else:
+        detail = f"Supporting measurements include {phrases[0]}, {phrases[1]}, and {phrases[2]}."
+
+    return f"{intro} {detail}"
 
 
 def explain_fast_features(
@@ -56,7 +90,7 @@ def explain_fast_features(
     prediction: FastLabel,
     profiles: FastFeatureProfiles,
     *,
-    top_k: int = 5,
+    top_k: int = 3,
 ) -> dict[str, Any]:
     """Rank features by closeness to the predicted class profile vs the other class."""
     values = np.asarray(features, dtype=np.float64).reshape(-1)
@@ -72,12 +106,10 @@ def explain_fast_features(
         predicted_z = spoof_z
         other_z = bonafide_z
         direction: Direction = "toward_spoof"
-        predicted_mean = profiles.spoof_mean
     else:
         predicted_z = bonafide_z
         other_z = spoof_z
         direction = "toward_bonafide"
-        predicted_mean = profiles.bonafide_mean
 
     closeness_margin = other_z - predicted_z
     profile_gap = np.abs(profiles.bonafide_mean - profiles.spoof_mean) / np.maximum(
@@ -95,11 +127,6 @@ def explain_fast_features(
     for idx in order:
         name = profiles.feature_names[int(idx)]
         value = float(values[int(idx)])
-        text = (
-            f"{fast_feature_label(name)} = {_round_float(value)}; "
-            f"this is {_relative_phrase(value, float(predicted_mean[int(idx)]), prediction)} "
-            f"and is closer to training examples labeled {prediction}."
-        )
         top_signals.append(
             {
                 "name": name,
@@ -115,13 +142,15 @@ def explain_fast_features(
                 },
                 "direction": direction,
                 "closeness_margin": _round_float(closeness_margin[int(idx)]),
-                "plain_text": text,
             }
         )
+
+    summary = build_explanation_summary(prediction, top_signals)
 
     return {
         "method": "class_profile_comparison",
         "prediction": prediction,
+        "summary": summary,
         "top_signals": top_signals,
         "disclaimer": DISCLAIMER,
     }

@@ -10,15 +10,26 @@ import {
   Gauge,
   Loader2,
   Lock,
+  Mic,
+  Pause,
+  Play,
   Radio,
   Radar,
   ShieldAlert,
   ShieldCheck,
   Sparkles,
+  Square,
   Upload,
   Zap
 } from 'lucide-react';
-import { applyTranscriptionResult, classifyAudio, getHealth, mapClassifyResponse, transcribeAudio } from './api';
+import {
+  applyTranscriptionResult,
+  classifyAudio,
+  getHealth,
+  mapClassifyResponse,
+  transcribeAudio
+} from './api';
+import { createObjectUrl, recordingBlobToFile, revokeObjectUrl } from './audioUtils';
 
 const intercepts = [
   {
@@ -148,6 +159,61 @@ function Waveform({ chunks, illustrative = false }) {
   );
 }
 
+function AudioPlayer({ url, label = 'Play clip' }) {
+  const audioRef = useRef(null);
+  const [playing, setPlaying] = useState(false);
+
+  useEffect(() => {
+    setPlaying(false);
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+    }
+  }, [url]);
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return undefined;
+
+    const onEnded = () => setPlaying(false);
+    const onPause = () => setPlaying(false);
+    const onPlay = () => setPlaying(true);
+
+    audio.addEventListener('ended', onEnded);
+    audio.addEventListener('pause', onPause);
+    audio.addEventListener('play', onPlay);
+
+    return () => {
+      audio.removeEventListener('ended', onEnded);
+      audio.removeEventListener('pause', onPause);
+      audio.removeEventListener('play', onPlay);
+    };
+  }, [url]);
+
+  if (!url) return null;
+
+  const togglePlayback = () => {
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    if (playing) {
+      audio.pause();
+    } else {
+      audio.play().catch(() => setPlaying(false));
+    }
+  };
+
+  return (
+    <div className="audio-player">
+      <audio ref={audioRef} src={url} preload="metadata" />
+      <Button type="button" variant="outline" className="audio-play-btn" onClick={togglePlayback}>
+        {playing ? <Pause size={16} /> : <Play size={16} />}
+        {playing ? 'Pause' : label}
+      </Button>
+    </div>
+  );
+}
+
 function AcousticRationale({ explanation }) {
   if (!explanation) {
     return (
@@ -171,23 +237,16 @@ function AcousticRationale({ explanation }) {
     );
   }
 
+  const summary =
+    explanation.summary ||
+    'The acoustic profile is consistent with the predicted class in the training corpus.';
+
   return (
     <div className="mini-card rationale-card">
       <div className="mini-title">
         <BrainCircuit size={16} /> Acoustic Rationale
       </div>
-      <div className="rationale-method">{explanation.method}</div>
-      <div className="signal-list">
-        {explanation.top_signals.map((signal) => (
-          <div key={signal.name} className="signal-row">
-            <div>
-              <div className="signal-name">{signal.label || signal.name}</div>
-              <div className="signal-copy">{signal.plain_text}</div>
-            </div>
-            <div className="signal-value">{signal.value}</div>
-          </div>
-        ))}
-      </div>
+      <p className="rationale-summary">{summary}</p>
       <p className="small-note disclaimer">{explanation.disclaimer}</p>
     </div>
   );
@@ -211,6 +270,10 @@ function MetricCard({ icon: Icon, label, value, sub }) {
 
 export default function App() {
   const fileInputRef = useRef(null);
+  const mediaRecorderRef = useRef(null);
+  const recordingStreamRef = useRef(null);
+  const recordingChunksRef = useRef([]);
+  const audioUrlRef = useRef(null);
   const [active, setActive] = useState(intercepts[1]);
   const [uploadResult, setUploadResult] = useState(null);
   const [uploadError, setUploadError] = useState('');
@@ -219,6 +282,27 @@ export default function App() {
   const [operatorDecision, setOperatorDecision] = useState('Escalate');
   const [backendHealth, setBackendHealth] = useState(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
+
+  useEffect(() => {
+    return () => {
+      revokeObjectUrl(audioUrlRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isRecording) {
+      setRecordingSeconds(0);
+      return undefined;
+    }
+
+    const timer = setInterval(() => {
+      setRecordingSeconds((seconds) => seconds + 1);
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [isRecording]);
 
   useEffect(() => {
     let cancelled = false;
@@ -249,17 +333,22 @@ export default function App() {
     fileInputRef.current?.click();
   };
 
-  const handleFileSelected = async (event) => {
-    const file = event.target.files?.[0];
-    event.target.value = '';
-    if (!file) return;
+  const stopRecordingTracks = () => {
+    recordingStreamRef.current?.getTracks().forEach((track) => track.stop());
+    recordingStreamRef.current = null;
+  };
 
+  const processAudioFile = async (file, sourceType = 'upload') => {
     setIsUploading(true);
     setUploadError('');
 
+    revokeObjectUrl(audioUrlRef.current);
+    const audioUrl = createObjectUrl(file);
+    audioUrlRef.current = audioUrl;
+
     try {
       const result = await classifyAudio(file);
-      const mapped = mapClassifyResponse(result);
+      const mapped = mapClassifyResponse(result, { sourceType, audioUrl });
       setUploadResult(mapped);
       setActive(mapped);
       setOperatorDecision(mapped.systemRecommendation);
@@ -283,11 +372,108 @@ export default function App() {
           setActive((current) => (current?.id === mapped.id ? updated : current));
         });
     } catch (error) {
-      setUploadError(error.message || 'Upload failed');
+      revokeObjectUrl(audioUrl);
+      audioUrlRef.current = null;
+      setUploadError(error.message || 'Analysis failed');
     } finally {
       setIsUploading(false);
     }
   };
+
+  const handleFileSelected = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+
+    await processAudioFile(file, 'upload');
+  };
+
+  const handleStartRecording = async () => {
+    if (isUploading || isRecording) return;
+
+    setUploadError('');
+
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setUploadError('Microphone recording is not supported in this browser.');
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      recordingStreamRef.current = stream;
+      recordingChunksRef.current = [];
+
+      const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+        ? 'audio/webm;codecs=opus'
+        : MediaRecorder.isTypeSupported('audio/webm')
+          ? 'audio/webm'
+          : '';
+
+      const recorder = mimeType
+        ? new MediaRecorder(stream, { mimeType })
+        : new MediaRecorder(stream);
+
+      mediaRecorderRef.current = recorder;
+
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          recordingChunksRef.current.push(event.data);
+        }
+      };
+
+      recorder.onstop = async () => {
+        stopRecordingTracks();
+
+        const blob = new Blob(recordingChunksRef.current, {
+          type: recorder.mimeType || 'audio/webm'
+        });
+        recordingChunksRef.current = [];
+
+        if (blob.size === 0) {
+          setUploadError('Recording was empty. Try again and speak into the microphone.');
+          return;
+        }
+
+        try {
+          const file = await recordingBlobToFile(blob, recorder.mimeType || 'audio/webm');
+          await processAudioFile(file, 'record');
+        } catch (error) {
+          setUploadError(error.message || 'Could not process recording');
+        }
+      };
+
+      recorder.start();
+      setIsRecording(true);
+    } catch (error) {
+      stopRecordingTracks();
+      setUploadError(error.message || 'Microphone access was denied');
+    }
+  };
+
+  const handleStopRecording = () => {
+    if (!isRecording) return;
+
+    mediaRecorderRef.current?.stop();
+    mediaRecorderRef.current = null;
+    setIsRecording(false);
+  };
+
+  const handleRecordClick = () => {
+    if (isRecording) {
+      handleStopRecording();
+    } else {
+      handleStartRecording();
+    }
+  };
+
+  const formatRecordingTime = (seconds) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  const hasPlayableAudio = Boolean(active.audioUrl);
+  const isBusy = isUploading || isRecording;
 
   const fakeScore = Math.round((active.spoofScore ?? active.syntheticScore ?? active.confidence) * 100);
   const authenticityScore =
@@ -342,11 +528,20 @@ export default function App() {
               hidden
               onChange={handleFileSelected}
             />
-            <Button onClick={handleUploadClick} disabled={isUploading}>
+            <Button onClick={handleUploadClick} disabled={isBusy}>
               {isUploading ? <Loader2 size={16} className="spin" /> : <Upload size={16} />}
               {isUploading ? 'Analyzing…' : 'Upload Audio'}
             </Button>
-            <Button variant="outline" onClick={() => setActive(intercepts[1])}>
+            <Button
+              variant="outline"
+              className={isRecording ? 'btn-recording' : ''}
+              onClick={handleRecordClick}
+              disabled={isUploading}
+            >
+              {isRecording ? <Square size={16} /> : <Mic size={16} />}
+              {isRecording ? `Stop · ${formatRecordingTime(recordingSeconds)}` : 'Record Live'}
+            </Button>
+            <Button variant="outline" onClick={() => setActive(intercepts[1])} disabled={isBusy}>
               <Sparkles size={16} /> Load Sample
             </Button>
           </div>
@@ -399,7 +594,9 @@ export default function App() {
                     className={`choice-btn intercept ${active.id === uploadResult.id ? 'active-fuchsia' : ''}`}
                   >
                     <div>
-                      <div className="intercept-title">Latest Upload</div>
+                      <div className="intercept-title">
+                        {uploadResult.source === 'record' ? 'Latest Recording' : 'Latest Upload'}
+                      </div>
                       <div className="intercept-sub">{uploadResult.title}</div>
                     </div>
                     <FileAudio size={18} />
@@ -451,13 +648,19 @@ export default function App() {
                     <AudioWaveform size={18} /> Audio + Transcript Analysis
                   </div>
                   <h2>{active.title}</h2>
+                  {hasPlayableAudio && (
+                    <AudioPlayer
+                      url={active.audioUrl}
+                      label={active.source === 'record' ? 'Play recording' : 'Play clip'}
+                    />
+                  )}
                 </div>
                 <RiskPill risk={active.risk} />
               </div>
 
               <div className="analysis-grid">
                 <div className="left-stack">
-                  {active.source === 'upload' ? (
+                  {active.source === 'upload' || active.source === 'record' ? (
                     <AcousticRationale explanation={active.explanation} />
                   ) : (
                     <Waveform chunks={active.chunks} illustrative />

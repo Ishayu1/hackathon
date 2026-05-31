@@ -42,7 +42,7 @@ export async function transcribeAudio(file, { signal, customKeywords = '', deepf
   return parseJsonResponse(response);
 }
 
-export function mapClassifyResponse(result) {
+export function mapClassifyResponse(result, { sourceType = 'upload', audioUrl = null } = {}) {
   const spoofScore = Math.min(
     1,
     Math.max(0, result.score_spoof ?? (result.is_spoof ? result.confidence : 1 - result.confidence))
@@ -80,9 +80,10 @@ export function mapClassifyResponse(result) {
 
   const transcription = result.transcription;
   const transcriptionAvailable = Boolean(transcription?.available);
+  const isRecording = sourceType === 'record';
   const transcript = transcriptionAvailable
     ? transcription.transcript || 'No speech detected.'
-    : `Transcription unavailable: ${transcription?.error || 'not returned by API'}`;
+    : 'Transcription running...';
   const segmentCategory = transcriptionAvailable ? transcription.category : null;
   const segmentSeverity = transcriptionAvailable ? transcription.severity : null;
   const severityScore = transcriptionAvailable ? transcription.severity_score ?? 0 : 0;
@@ -131,8 +132,8 @@ export function mapClassifyResponse(result) {
   }
 
   return {
-    id: `upload-${Date.now()}`,
-    title: result.filename || 'Uploaded Audio',
+    id: `${sourceType}-${Date.now()}`,
+    title: isRecording ? 'Live Recording' : result.filename || 'Uploaded Audio',
     subtitle: `${result.backend} · ${result.label}`,
     authenticity,
     spoofScore,
@@ -140,10 +141,11 @@ export function mapClassifyResponse(result) {
     latency: Math.round(result.total_ms ?? 0),
     risk,
     intent,
-    transcript: transcriptionAvailable ? transcript : 'Transcription running...',
+    transcript,
     recommendation,
     systemRecommendation,
-    source: 'upload',
+    source: sourceType === 'record' ? 'record' : 'upload',
+    audioUrl,
     chunks: transcriptionAvailable && transcription.chunks?.length
       ? transcription.chunks.map((chunk) => Math.min(1, Math.max(0.05, (chunk.severity_score || 0) / 100)))
       : [],
