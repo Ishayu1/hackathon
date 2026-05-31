@@ -406,11 +406,13 @@ def score_severity(
         matched_terms.extend(f"custom: {match}" for match in custom_matches)
 
     for signal, value in (external_signals or {}).items():
-        if signal in {"deepfake_probability", "lie_probability"} and isinstance(value, (int, float)):
+        if signal in {"deepfake_probability", "lie_probability", "duress_probability"} and isinstance(value, (int, float)):
             if value >= 0.85:
                 score += 20
             elif value >= 0.65:
                 score += 10
+            if signal == "duress_probability" and value >= 0.5:
+                matched_terms.append("acoustic duress signal")
 
     score = min(score, 100)
     if matched_levels and matched_levels <= {SeverityLevel.LOW}:

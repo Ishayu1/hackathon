@@ -1,11 +1,27 @@
-# Spectra-AASIST3 V1 — Audio Deepfake Detection
+# SignalShield AI — Mission Audio Triage
 
-Inference pipeline using [Spectra-AASIST3](https://huggingface.co/lab260/Spectra-AASIST3) with ASVspoof 2019 LA evaluation and a FastAPI upload endpoint.
+Detect synthetic speech, acoustic duress, and operational content from uploaded or live audio. Built for hackathon demos with both a high-accuracy neural baseline ([Spectra-AASIST3](https://huggingface.co/lab260/Spectra-AASIST3)) and a sub-10 ms classical fallback (MFCC + RBF SVM).
 
-Also includes a **fast hackathon fallback**:
-- `16k mono -> 4s crop/pad -> MFCC features -> RBF SVM (default) or other sklearn classifiers`
+**Live dashboard:** React frontend + FastAPI backend. Upload a clip or record live → get authenticity score, duress analysis, transcript triage, and operator recommendations in seconds.
 
-## Setup
+---
+
+## Features
+
+| Capability | Backend | Latency |
+|------------|---------|---------|
+| **Deepfake detection (neural)** | Spectra-AASIST3 + Wav2Vec2 | ~190 ms |
+| **Deepfake detection (fast)** | MFCC/LFCC + RBF SVM | ~7 ms |
+| **Acoustic duress** | Wav2Vec2 + BiLSTM | ~45 ms |
+| **Speech transcription** | faster-whisper (`tiny.en`) | ~0.3× realtime |
+| **Message triage** | Rule-based keyword classifier | < 1 ms |
+| **Explainability** | Class-profile comparison (fast model) | Included in `/classify` |
+
+---
+
+## Quick Start
+
+### 1. Backend setup
 
 ```bash
 cd Hackathon
@@ -14,11 +30,137 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-First run downloads ~2.5 GB (Spectra-AASIST3 weights + Wav2Vec2 encoder).
+First Spectra run downloads ~2.5 GB (model weights + Wav2Vec2 encoder). The default **fast** backend uses pre-trained `.joblib` artifacts in `results/` and does not require this download.
 
-## Full baseline results (ASVspoof 2019 LA, full splits)
+Place duress weights at project root (optional but recommended):
 
-Train on **all 25,380** train clips; evaluate on full **validation (dev)** and **test (eval)** splits:
+```
+temporal_bilstm_duress.pth
+```
+
+### 2. Start the API
+
+```bash
+# Default: demo-tuned fast RBF (~7 ms, 99% on demo dataset)
+uvicorn api.main:app --host 127.0.0.1 --port 8000
+```
+
+Verify:
+
+```bash
+curl http://localhost:8000/health
+```
+
+### 3. Start the frontend
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Open [http://localhost:5173](http://localhost:5173). Upload a `.flac` / `.wav` clip or use **Record Live**.
+
+The Vite dev server proxies `/api/*` → `http://127.0.0.1:8000`.
+
+---
+
+## Configuration
+
+Environment variables (set before `uvicorn`):
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MODEL_BACKEND` | `fast` | `fast` or `spectra` |
+| `FAST_MODEL_PATH` | demo `.joblib` if present | Override fast model artifact |
+| `FAST_PROFILE_PATH` | `results/fast_demo_feature_profiles.json` | XAI feature profiles |
+| `SPECTRA_DECISION` | `argmax` | `argmax` or `threshold` (spectra only) |
+| `DURESS_ENABLED` | `1` | Set `0` to disable duress |
+| `DURESS_MODEL_PATH` | `temporal_bilstm_duress.pth` | Duress weights |
+| `DURESS_THRESHOLD` | `0.5` | Duress decision cutoff |
+| `TRANSCRIBER_MODEL_SIZE` | `tiny.en` | faster-whisper model |
+| `TRANSCRIBER_DEVICE` | `cpu` | Whisper device |
+| `TRANSCRIBER_COMPUTE_TYPE` | `int8` | Quantization type |
+| `TRANSCRIBER_VAD_FILTER` | `0` | Enable for long/noisy clips |
+| `CORS_ORIGINS` | `localhost:5173` | Allowed frontend origins |
+
+**Examples:**
+
+```bash
+# Spectra neural backend (best ASVspoof accuracy)
+MODEL_BACKEND=spectra SPECTRA_DECISION=argmax uvicorn api.main:app --host 0.0.0.0 --port 8000
+
+# ASVspoof-trained fast model instead of demo-tuned
+FAST_MODEL_PATH=results/fast_baseline_mfcc_rbf_svc.joblib \
+MODEL_BACKEND=fast uvicorn api.main:app --host 0.0.0.0 --port 8000
+
+# Remote frontend
+VITE_API_BASE=http://your-host:8000 npm run dev
+```
+
+---
+
+## API Usage
+
+### Classify (deepfake + duress)
+
+```bash
+curl -X POST http://localhost:8000/classify \
+  -F "file=@data/demo/deepfake-audio-detection/real/real_0000.flac"
+```
+
+### Transcribe (speech + triage)
+
+```bash
+curl -X POST http://localhost:8000/transcribe \
+  -F "file=@sample.wav" \
+  -F "custom_keywords=convoy,medevac" \
+  -F "deepfake_probability=0.15" \
+  -F "duress_probability=0.0"
+```
+
+Full API reference: [docs/API.md](docs/API.md)
+
+---
+
+## Transcription & Triage (CLI)
+
+Standalone transcription without the API:
+
+```bash
+pip install faster-whisper   # also requires ffmpeg
+python transcriber.py audio.wav --device cpu --compute-type int8 --model-size tiny.en
+```
+
+Stream segment-level JSON for live dashboards:
+
+```bash
+python transcriber.py audio.wav --stream
+```
+
+Python usage:
+
+```python
+from transcriber import FastMilitaryTranscriber
+
+transcriber = FastMilitaryTranscriber(model_size="tiny.en", device="cpu", compute_type="int8")
+result = transcriber.transcribe("audio.wav", external_signals={"deepfake_probability": 0.12})
+print(result.category, result.severity, result.transcript)
+```
+
+Categories: `administrative`, `command`, `intelligence`, `logistics`, `medical`, `emergency`, `authentication`, `unknown`.
+
+Severity: `low` → `medium` → `high` → `critical` (rule-based keyword scoring).
+
+Full triage reference: [docs/TRIAGE.md](docs/TRIAGE.md)
+
+---
+
+## Model Benchmarks
+
+### ASVspoof 2019 LA (full splits)
+
+Train on all 25,380 train clips; evaluate on validation and test:
 
 ```bash
 python scripts/run_full_fast_pipeline.py
@@ -26,147 +168,106 @@ python scripts/run_full_fast_pipeline.py
 
 | Model | Split | EER | Latency (p95) |
 |-------|-------|-----|---------------|
-| **Fast baseline** (MFCC + RBF SVM) | dev (validation) | **~10%** (8k/3k shootout) | ~6 ms |
-| **Fast baseline** (MFCC + LR, full) | test (eval) | **21.43%** | ~6.6 ms |
-| **Spectra-AASIST3** (published) | test (eval) | **0.723%** | ~190 ms (MPS) |
+| Fast baseline (MFCC + RBF SVM) | dev | ~10% | ~6 ms |
+| Fast baseline (MFCC + LR) | test | 21.43% | ~6.6 ms |
+| **Spectra-AASIST3** (published) | test | **0.723%** | ~190 ms (MPS) |
 
-Full comparison: `results/comparison_fast_vs_spectra.json`
-Trained model (default): `results/fast_baseline_mfcc_rbf_svc.joblib`
-
-## Batch evaluation (ASVspoof 2019 LA)
-
-Dataset: [Bisher/ASVspoof_2019_LA](https://huggingface.co/datasets/Bisher/ASVspoof_2019_LA) (~7.5 GB).
+### Demo dataset (Gary Stafford TTS, 1,866 clips)
 
 ```bash
-# Smoke test
-python scripts/eval_asvspoof.py --split validation --max-samples 100
-
-# Dev split EER
-python scripts/eval_asvspoof.py --split validation --batch-size 16
-
-# Full test split EER (compare to model card baseline 0.723%)
-python scripts/eval_asvspoof.py --split test --batch-size 16
-```
-
-Results are written to `results/scores_{split}.tsv` and `results/summary_{split}.json`.
-
-## Fast baseline (recommended hackathon fallback)
-
-Train on ASVspoof train split and evaluate quickly:
-
-```bash
-# Default: MFCC + RBF SVM
-python scripts/eval_fast_baseline.py \
-  --train-split train \
-  --eval-split validation \
-  --max-train-samples 8000 \
-  --max-eval-samples 3000
-
-# Alternatives
-python scripts/eval_fast_baseline.py --model-type random_forest
-python scripts/eval_fast_baseline.py --model-type logistic_regression
-```
-
-Outputs:
-- model artifact: `results/fast_baseline_{feature}_{model}.joblib`
-- metrics: `results/summary_fast_{feature}_{model}_{split}.json`
-- scores: `results/scores_fast_{feature}_{model}_{split}.tsv`
-
-## Demo dataset evaluation (Gary Stafford TTS)
-
-Local demo set: **1,866** FLAC clips (933 real YouTube / 933 modern TTS). Train a demo-tuned fast model, then batch-eval all backends:
-
-```bash
-# Train RBF SVM on 80/20 stratified split (uses feature cache after first run)
 python scripts/train_demo_rbf.py
-
-# Batch eval: Spectra (threshold + argmax) + fast ASVspoof RBF + fast demo RBF
 python scripts/eval_demo_dataset.py
 ```
 
 | Model | Demo accuracy | Latency p50 |
 |-------|---------------|-------------|
-| Spectra + **threshold** (ASVspoof cutoff) | 62.3% | ~181 ms |
-| Spectra + **argmax** | 92.6% | ~185 ms |
+| Spectra + threshold | 62.3% | ~181 ms |
+| Spectra + argmax | 92.6% | ~185 ms |
 | Fast RBF (ASVspoof-trained) | 47.7% | ~7 ms |
 | **Fast RBF (demo-trained)** | **99.0%** | **~7 ms** |
 
-Demo-tuned model: `results/fast_baseline_mfcc_rbf_svc_demo.joblib`
-Full metrics: `results/summary_demo_eval.json`
+**Hackathon recommendation:** use **fast demo RBF** for live uploads (speed + domain match). Cite Spectra **0.723% EER on ASVspoof** for accuracy narrative.
 
-**Hackathon recommendation:** use **fast demo RBF** for live uploads (speed + domain match). Cite Spectra **0.723% EER on ASVspoof** for accuracy narrative; use `MODEL_BACKEND=spectra` with `SPECTRA_DECISION=argmax` when you want the neural model on demo clips.
+Artifacts:
+- Demo model: `results/fast_baseline_mfcc_rbf_svc_demo.joblib`
+- ASVspoof model: `results/fast_baseline_mfcc_rbf_svc.joblib`
+- Metrics: `results/summary_demo_eval.json`, `results/comparison_fast_vs_spectra.json`
 
-## API
+---
+
+## Evaluation Scripts
+
+### ASVspoof batch eval
+
+Dataset: [Bisher/ASVspoof_2019_LA](https://huggingface.co/datasets/Bisher/ASVspoof_2019_LA) (~7.5 GB).
 
 ```bash
-uvicorn api.main:app --host 0.0.0.0 --port 8000
+python scripts/eval_asvspoof.py --split validation --max-samples 100   # smoke test
+python scripts/eval_asvspoof.py --split validation --batch-size 16      # dev EER
+python scripts/eval_asvspoof.py --split test --batch-size 16           # test EER
 ```
 
-Defaults (demo-ready):
-- `MODEL_BACKEND=fast` — loads demo-tuned RBF if `results/fast_baseline_mfcc_rbf_svc_demo.joblib` exists
-- `FAST_MODEL_PATH=...` — override fast model artifact
-- `SPECTRA_DECISION=argmax` — when using Spectra (fixes threshold mismatch on modern TTS)
-
-Use Spectra neural backend:
+### Fast baseline train/eval
 
 ```bash
-MODEL_BACKEND=spectra SPECTRA_DECISION=argmax uvicorn api.main:app --host 0.0.0.0 --port 8000
+python scripts/eval_fast_baseline.py \
+  --train-split train --eval-split validation \
+  --max-train-samples 8000 --max-eval-samples 3000
+
+python scripts/eval_fast_baseline.py --model-type random_forest
+python scripts/eval_fast_baseline.py --model-type logistic_regression
 ```
 
-Use demo-tuned fast baseline explicitly:
+### Demo dataset
 
 ```bash
-MODEL_BACKEND=fast \
-FAST_MODEL_PATH=results/fast_baseline_mfcc_rbf_svc_demo.joblib \
-uvicorn api.main:app --host 0.0.0.0 --port 8000
+python scripts/download_demo_dataset.py
+python scripts/train_demo_rbf.py
+python scripts/eval_demo_dataset.py
 ```
 
-Use ASVspoof-trained fast baseline instead of demo-tuned:
+Dataset layout:
 
-```bash
-FAST_MODEL_PATH=results/fast_baseline_mfcc_rbf_svc.joblib \
-MODEL_BACKEND=fast uvicorn api.main:app --host 0.0.0.0 --port 8000
+```
+data/demo/deepfake-audio-detection/
+  real/   # 933 authentic YouTube speech clips
+  fake/   # 933 TTS clips (ElevenLabs, Polly, Speechify, etc.)
+  manifest.json
 ```
 
-```bash
-curl -X POST http://localhost:8000/classify -F "file=@sample.wav"
-```
-
-## Out-of-domain test clips
-
-Download held-out evaluation sets **not used in demo training** for manual upload testing:
+### Out-of-domain test clips
 
 ```bash
-# ASVspoof 2019 LA validation subset (~100 clips, fast if cached)
 python scripts/download_ood_testsets.py --skip-itw --per-class 50
-
-# In-The-Wild (~8 GB zip; re-run without --skip-itw when download completes)
-python scripts/download_ood_testsets.py --per-class 50
-
-# Batch eval demo model on OOD manifests
+python scripts/download_ood_testsets.py --per-class 50   # includes In-The-Wild (~8 GB)
 python scripts/eval_ood_testsets.py
 ```
 
-Clips land in:
-- `data/ood/asvspoof19-la/{real,fake}/` — lab vocoder/TTS attacks (ASVspoof)
-- `data/ood/in-the-wild/{real,fake}/` — celebrity/politician deepfakes (in-the-wild)
+Clips: `data/ood/asvspoof19-la/{real,fake}/`, `data/ood/in-the-wild/{real,fake}/`
 
-If OOD accuracy is poor, train a pooled model on demo + ASVspoof:
+If OOD accuracy is poor, train a pooled model:
 
 ```bash
 python scripts/train_pooled_rbf.py
-python scripts/eval_ood_testsets.py  # after pointing --model-path to pooled joblib
 ```
 
-## Fast Baseline Explainability
+---
 
-For `MODEL_BACKEND=fast`, `/classify` includes an `explanation` object generated from the same 88 MFCC/LFCC and spectral features used by the classifier. The method compares the uploaded clip's feature values with bonafide and spoof class profiles computed from the Gary Stafford demo train split only (`scripts/build_feature_profiles.py`). The API returns a short `summary` (2 sentences) citing the top supporting measurements, phrased as corpus similarity rather than causal proof. Spectra/Wav2Vec2 responses return `explanation: null`; MFCC explanations are not claimed for that backend. Rebuild profiles with:
+## Explainability (Fast Model)
+
+For `MODEL_BACKEND=fast`, `/classify` returns an `explanation` object comparing the clip's MFCC/LFCC features against bonafide and spoof class profiles from the demo train split.
+
+Rebuild profiles:
 
 ```bash
 python scripts/build_feature_profiles.py
 ```
 
-## Go / no-go criteria
+Spectra responses return `explanation: null`.
+
+---
+
+## Go / No-Go Criteria
 
 | Signal | Green | Red |
 |--------|-------|-----|
@@ -176,45 +277,53 @@ python scripts/build_feature_profiles.py
 
 Model card baseline: **0.723% EER** on ASVspoof19 LA.
 
-## Demo test clips
+---
 
-Local copy of [garystafford/deepfake-audio-detection](https://huggingface.co/datasets/garystafford/deepfake-audio-detection) (~1.9k FLAC files):
-
-```bash
-python scripts/download_demo_dataset.py   # re-download if needed
-```
+## Project Structure
 
 ```
-data/demo/deepfake-audio-detection/
-  real/   # 933 authentic YouTube speech clips
-  fake/   # 933 TTS clips (ElevenLabs, Polly, Speechify, etc.)
-  manifest.json
+Hackathon/
+├── api/main.py              # FastAPI service
+├── transcriber.py           # Whisper + military triage
+├── src/                     # ML core (inference, duress, fast baseline, XAI)
+├── frontend/                # React dashboard (SignalShield AI)
+├── scripts/                 # Training, eval, dataset download
+├── results/                 # Models, metrics, feature profiles
+├── data/demo/               # Gary Stafford demo dataset
+├── data/ood/                # Out-of-domain test clips
+├── vendor/spectra_aasist3/  # Vendored Spectra model
+├── Agents.md                # AI pipeline / analyst module architecture
+└── docs/
+    ├── ARCHITECTURE.md      # System design
+    ├── API.md               # HTTP API reference
+    └── TRIAGE.md            # Transcription & triage rules
 ```
 
-Quick classify test:
+---
 
-```bash
-curl -X POST http://localhost:8000/classify \
-  -F "file=@data/demo/deepfake-audio-detection/real/real_0000.flac"
+## Documentation Index
 
-curl -X POST http://localhost:8000/classify \
-  -F "file=@data/demo/deepfake-audio-detection/fake/fake_0500.flac"
-```
+| Document | Contents |
+|----------|----------|
+| [Agents.md](Agents.md) | Analyst modules, signal fusion, configuration |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Components, preprocessing, deployment |
+| [docs/API.md](docs/API.md) | `/health`, `/classify`, `/transcribe` reference |
+| [docs/TRIAGE.md](docs/TRIAGE.md) | Categories, severity, keyword tuning |
 
-## Frontend (Mission Audio Triage Dashboard)
+---
 
-Run **both** the API and the Vite dev server:
+## Dependencies
 
-```bash
-# Terminal 1 — backend (demo RBF default)
-uvicorn api.main:app --host 127.0.0.1 --port 8000
+**Python** (`requirements.txt`): torch, torchaudio, transformers, huggingface_hub, fastapi, uvicorn, scikit-learn, librosa, faster-whisper, soundfile, datasets, numpy.
 
-# Terminal 2 — frontend (proxies /api → :8000)
-cd frontend
-npm install
-npm run dev
-```
+**Frontend** (`frontend/package.json`): React 18, Vite 5, Framer Motion, Lucide React.
 
-Open `http://localhost:5173`, click **Upload Audio**, and pick a `.flac` / `.wav` clip. The UI calls `POST /classify` and renders label, spoof score, latency, and risk band.
+**System:** Python 3.10+, Node 18+, ffmpeg (for transcription).
 
-Optional: point at a remote API with `VITE_API_BASE=http://your-host:8000 npm run dev`.
+---
+
+## License & Attribution
+
+- Spectra-AASIST3: [lab260/Spectra-AASIST3](https://huggingface.co/lab260/Spectra-AASIST3)
+- Demo dataset: [garystafford/deepfake-audio-detection](https://huggingface.co/datasets/garystafford/deepfake-audio-detection)
+- ASVspoof eval: [Bisher/ASVspoof_2019_LA](https://huggingface.co/datasets/Bisher/ASVspoof_2019_LA)

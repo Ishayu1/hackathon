@@ -27,11 +27,15 @@ export async function classifyAudio(file, { signal, customKeywords = '' } = {}) 
   return parseJsonResponse(response);
 }
 
-export async function transcribeAudio(file, { signal, customKeywords = '', deepfakeProbability = 0 } = {}) {
+export async function transcribeAudio(
+  file,
+  { signal, customKeywords = '', deepfakeProbability = 0, duressProbability = 0 } = {}
+) {
   const form = new FormData();
   form.append('file', file);
   form.append('custom_keywords', customKeywords);
   form.append('deepfake_probability', String(deepfakeProbability));
+  form.append('duress_probability', String(duressProbability));
 
   const response = await fetch(`${API_BASE}/transcribe`, {
     method: 'POST',
@@ -40,6 +44,73 @@ export async function transcribeAudio(file, { signal, customKeywords = '', deepf
   });
 
   return parseJsonResponse(response);
+}
+
+function elevateRisk(currentRisk, nextRisk) {
+  const riskRank = { LOW: 0, HIGH: 1, CRITICAL: 2 };
+  return riskRank[nextRisk] > riskRank[currentRisk] ? nextRisk : currentRisk;
+}
+
+function mapDuressFields(duress) {
+  if (!duress?.available) {
+    return {
+      duressAvailable: false,
+      duressLabel: 'Unavailable',
+      isDuress: false,
+      duressScore: 0,
+      duressPercent: 0,
+      duressThreshold: 0.5,
+      duressError: duress?.error || null
+    };
+  }
+
+  const duressScore = Math.min(1, Math.max(0, duress.probability ?? 0));
+  return {
+    duressAvailable: true,
+    duressLabel: duress.is_duress ? 'Duress Detected' : 'Normal Tone',
+    isDuress: Boolean(duress.is_duress),
+    duressScore,
+    duressPercent: Math.round(duressScore * 100),
+    duressThreshold: duress.threshold ?? 0.5,
+    duressError: null
+  };
+}
+
+function applyDuressToRisk(risk, recommendation, systemRecommendation, duressFields) {
+  let nextRisk = risk;
+  let nextRecommendation = recommendation;
+  let nextSystemRecommendation = systemRecommendation;
+
+  if (!duressFields.duressAvailable) {
+    return { risk: nextRisk, recommendation: nextRecommendation, systemRecommendation: nextSystemRecommendation };
+  }
+
+  if (duressFields.duressScore >= 0.85) {
+    nextRisk = elevateRisk(nextRisk, 'CRITICAL');
+    nextRecommendation =
+      'Acoustic stress indicators are strong. Treat as potential duress and verify identity through a secondary channel.';
+    nextSystemRecommendation = 'ESCALATE';
+  } else if (duressFields.duressScore >= 0.65) {
+    nextRisk = elevateRisk(nextRisk, 'HIGH');
+    nextRecommendation =
+      `${nextRecommendation} Elevated acoustic duress signal detected; confirm speaker safety before acting on commands.`;
+    if (nextSystemRecommendation === 'TRUST') {
+      nextSystemRecommendation = 'VERIFY';
+    }
+  } else if (duressFields.isDuress) {
+    nextRisk = elevateRisk(nextRisk, 'HIGH');
+    nextRecommendation =
+      `${nextRecommendation} Moderate acoustic duress indicators present; verify caller identity.`;
+    if (nextSystemRecommendation === 'TRUST') {
+      nextSystemRecommendation = 'VERIFY';
+    }
+  }
+
+  return {
+    risk: nextRisk,
+    recommendation: nextRecommendation,
+    systemRecommendation: nextSystemRecommendation
+  };
 }
 
 export function mapClassifyResponse(result, { sourceType = 'upload', audioUrl = null } = {}) {
@@ -131,6 +202,14 @@ export function mapClassifyResponse(result, { sourceType = 'upload', audioUrl = 
     }
   }
 
+  const duressFields = mapDuressFields(result.duress);
+  ({ risk, recommendation, systemRecommendation } = applyDuressToRisk(
+    risk,
+    recommendation,
+    systemRecommendation,
+    duressFields
+  ));
+
   return {
     id: `${sourceType}-${Date.now()}`,
     title: isRecording ? 'Live Recording' : result.filename || 'Uploaded Audio',
@@ -154,7 +233,8 @@ export function mapClassifyResponse(result, { sourceType = 'upload', audioUrl = 
     transcription,
     transcriptionTerms: terms,
     isTranscribing: !transcriptionAvailable,
-    raw: result
+    raw: result,
+    ...duressFields
   };
 }
 
@@ -180,7 +260,7 @@ export function applyTranscriptionResult(active, transcription) {
     high: 'HIGH',
     critical: 'CRITICAL'
   }[segmentSeverity] || 'LOW';
-  const risk = riskRank[severityRisk] > riskRank[active.risk] ? severityRisk : active.risk;
+  let risk = riskRank[severityRisk] > riskRank[active.risk] ? severityRisk : active.risk;
 
   let recommendation = active.recommendation;
   let systemRecommendation = active.systemRecommendation;
@@ -191,6 +271,17 @@ export function applyTranscriptionResult(active, transcription) {
     recommendation = `${recommendation} Transcript contains operational terms; verify before execution.`;
     systemRecommendation = 'VERIFY';
   }
+
+  ({ risk, recommendation, systemRecommendation } = applyDuressToRisk(
+    risk,
+    recommendation,
+    systemRecommendation,
+    {
+      duressAvailable: active.duressAvailable,
+      duressScore: active.duressScore,
+      isDuress: active.isDuress
+    }
+  ));
 
   return {
     ...active,

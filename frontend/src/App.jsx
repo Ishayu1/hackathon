@@ -1,23 +1,19 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import {
   AlertTriangle,
   AudioWaveform,
-  BadgeCheck,
   BrainCircuit,
   Clock,
-  FileAudio,
   Gauge,
+  HeartPulse,
   Loader2,
-  Lock,
   Mic,
   Pause,
   Play,
-  Radio,
   Radar,
   ShieldAlert,
   ShieldCheck,
-  Sparkles,
   Square,
   Upload,
   Zap
@@ -30,72 +26,7 @@ import {
   transcribeAudio
 } from './api';
 import { createObjectUrl, recordingBlobToFile, revokeObjectUrl } from './audioUtils';
-
-const intercepts = [
-  {
-    id: 'routine',
-    title: 'Routine Base Update',
-    subtitle: 'Supply check-in',
-    authenticity: 'Likely Real',
-    spoofScore: 0.18,
-    confidence: 0.82,
-    latency: 112,
-    source: 'sample',
-    risk: 'LOW',
-    intent: 'Routine logistics update',
-    transcript:
-      'Routine supply check completed at Base Bravo. No additional support required.',
-    recommendation: 'Log message. No escalation required.',
-    chunks: [0.11, 0.18, 0.15, 0.09, 0.13],
-    watch: ['Base Bravo']
-  },
-  {
-    id: 'convoy',
-    title: 'Convoy Reroute Order',
-    subtitle: 'Movement command',
-    authenticity: 'Likely Synthetic',
-    spoofScore: 0.91,
-    confidence: 0.91,
-    latency: 184,
-    source: 'sample',
-    risk: 'CRITICAL',
-    intent: 'Movement order / logistics reroute',
-    transcript:
-      'Convoy Alpha should reroute to Checkpoint Delta immediately. Repeat, reroute to Checkpoint Delta.',
-    recommendation:
-      'Do not execute automatically. Verify through secondary channel and escalate to communications officer.',
-    chunks: [0.21, 0.44, 0.78, 0.91, 0.86],
-    watch: ['Convoy Alpha', 'Checkpoint Delta', 'reroute']
-  },
-  {
-    id: 'warning',
-    title: 'Drone Activity Warning',
-    subtitle: 'Threat alert',
-    authenticity: 'Uncertain',
-    spoofScore: 0.62,
-    confidence: 0.62,
-    latency: 156,
-    source: 'sample',
-    risk: 'HIGH',
-    intent: 'Threat warning',
-    transcript:
-      'Drone activity detected near the north gate. All units should prepare for immediate response.',
-    recommendation:
-      'Escalate for confirmation. Cross-check with sensor feeds before operational action.',
-    chunks: [0.32, 0.49, 0.62, 0.58, 0.46],
-    watch: ['Drone activity', 'north gate', 'immediate response']
-  }
-];
-
-const missionProfiles = [
-  'Convoy Logistics',
-  'Base Security',
-  'Cyber Ops',
-  'Medical Evac',
-  'Supply Chain'
-];
-
-const operatorActions = ['Trust', 'Verify', 'Escalate', 'Block'];
+import { highlightTranscript, parseWatchlistKeywords } from './textUtils';
 
 function Card({ children, className = '' }) {
   return <div className={`card ${className}`}>{children}</div>;
@@ -111,52 +42,6 @@ function Button({ children, className = '', variant = 'solid', ...props }) {
 
 function RiskPill({ risk }) {
   return <span className={`risk-pill risk-${risk.toLowerCase()}`}>{risk}</span>;
-}
-
-function Waveform({ chunks, illustrative = false }) {
-  const bars = useMemo(
-    () =>
-      Array.from({ length: 56 }, (_, i) => {
-        const chunkIndex = Math.min(chunks.length - 1, Math.floor((i / 56) * chunks.length));
-        const base = chunks[chunkIndex];
-        return 18 + Math.round(Math.abs(Math.sin(i * 0.72) + Math.cos(i * 0.31)) * 18 + base * 38);
-      }),
-    [chunks]
-  );
-
-  const maxChunk = chunks.indexOf(Math.max(...chunks));
-  return (
-    <div className="wave-wrap">
-      <div className="wave-topline" />
-      <div className="wave-meta">
-        <span>{illustrative ? 'Sample scenario (illustrative)' : 'Audio signal scan'}</span>
-        <span>{illustrative ? 'not model output' : '4s windows · 1s overlap'}</span>
-      </div>
-      <div className="wave-bars">
-        {bars.map((h, i) => {
-          const chunkIndex = Math.min(chunks.length - 1, Math.floor((i / 56) * chunks.length));
-          const hot = chunkIndex === maxChunk;
-          return (
-            <motion.div
-              key={i}
-              initial={{ height: 4, opacity: 0.5 }}
-              animate={{ height: h, opacity: 1 }}
-              transition={{ delay: i * 0.008, duration: 0.35 }}
-              className={`wave-bar ${hot ? 'wave-hot' : ''}`}
-            />
-          );
-        })}
-      </div>
-      <div className="segment-grid">
-        {chunks.map((score, idx) => (
-          <div key={idx} className={`segment ${idx === maxChunk ? 'segment-hot' : ''}`}>
-            <div className="segment-time">{idx * 3}-{idx * 3 + 4}s</div>
-            <div className="segment-score">{Math.round(score * 100)}%</div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
 }
 
 function AudioPlayer({ url, label = 'Play clip' }) {
@@ -268,18 +153,45 @@ function MetricCard({ icon: Icon, label, value, sub }) {
   );
 }
 
+function HighlightedTranscript({ text, watchlist }) {
+  const parts = highlightTranscript(text, watchlist);
+
+  return (
+    <p className="quote">
+      “
+      {parts.map((part, index) =>
+        part.highlight ? (
+          <span key={index} className="keyword-color">
+            {part.text}
+          </span>
+        ) : (
+          <span key={index}>{part.text}</span>
+        )
+      )}
+      ”
+    </p>
+  );
+}
+
+function EmptyState() {
+  return (
+    <Card className="empty-state">
+      <AudioWaveform size={28} />
+      <h2>No audio analyzed yet</h2>
+      <p>Upload a clip or record live audio to run deepfake detection, duress analysis, and transcription.</p>
+    </Card>
+  );
+}
+
 export default function App() {
   const fileInputRef = useRef(null);
   const mediaRecorderRef = useRef(null);
   const recordingStreamRef = useRef(null);
   const recordingChunksRef = useRef([]);
   const audioUrlRef = useRef(null);
-  const [active, setActive] = useState(intercepts[1]);
-  const [uploadResult, setUploadResult] = useState(null);
+  const [active, setActive] = useState(null);
   const [uploadError, setUploadError] = useState('');
-  const [mission, setMission] = useState(missionProfiles[0]);
-  const [watchlist, setWatchlist] = useState('Convoy Alpha, Checkpoint Delta, Fuel Depot, Sector 7');
-  const [operatorDecision, setOperatorDecision] = useState('Escalate');
+  const [watchlist, setWatchlist] = useState('');
   const [backendHealth, setBackendHealth] = useState(null);
   const [isUploading, setIsUploading] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
@@ -349,26 +261,34 @@ export default function App() {
     try {
       const result = await classifyAudio(file);
       const mapped = mapClassifyResponse(result, { sourceType, audioUrl });
-      setUploadResult(mapped);
       setActive(mapped);
-      setOperatorDecision(mapped.systemRecommendation);
 
       transcribeAudio(file, {
         customKeywords: watchlist,
-        deepfakeProbability: mapped.spoofScore
+        deepfakeProbability: mapped.spoofScore,
+        duressProbability: mapped.duressScore ?? 0
       })
         .then((transcription) => {
-          const updated = applyTranscriptionResult(mapped, transcription);
-          setUploadResult((current) => (current?.id === mapped.id ? updated : current));
-          setActive((current) => (current?.id === mapped.id ? updated : current));
-          setOperatorDecision(updated.systemRecommendation);
+          try {
+            const updated = applyTranscriptionResult(mapped, transcription);
+            setActive((current) => (current?.id === mapped.id ? updated : current));
+          } catch (error) {
+            setActive((current) =>
+              current?.id === mapped.id
+                ? {
+                    ...current,
+                    isTranscribing: false,
+                    transcript: `Transcription update failed: ${error.message || 'unknown error'}`
+                  }
+                : current
+            );
+          }
         })
         .catch((error) => {
           const updated = applyTranscriptionResult(mapped, {
             available: false,
             error: error.message || 'Transcription failed'
           });
-          setUploadResult((current) => (current?.id === mapped.id ? updated : current));
           setActive((current) => (current?.id === mapped.id ? updated : current));
         });
     } catch (error) {
@@ -472,25 +392,29 @@ export default function App() {
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
-  const hasPlayableAudio = Boolean(active.audioUrl);
   const isBusy = isUploading || isRecording;
 
-  const fakeScore = Math.round((active.spoofScore ?? active.syntheticScore ?? active.confidence) * 100);
-  const authenticityScore =
-    active.authenticity === 'Likely Real'
+  const fakeScore = active
+    ? Math.round((active.spoofScore ?? active.syntheticScore ?? active.confidence) * 100)
+    : 0;
+  const duressScore = active?.duressAvailable
+    ? active.duressPercent ?? Math.round((active.duressScore ?? 0) * 100)
+    : null;
+  const authenticityScore = active
+    ? active.authenticity === 'Likely Real'
       ? Math.round((active.confidence ?? 1 - (active.spoofScore ?? 0)) * 100)
-      : Math.round((active.confidence ?? active.spoofScore ?? 0) * 100);
+      : Math.round((active.confidence ?? active.spoofScore ?? 0) * 100)
+    : 0;
 
   const systemRecommendation =
-    active.systemRecommendation ||
-    (active.risk === 'LOW' ? 'TRUST' : active.risk === 'HIGH' ? 'VERIFY' : 'ESCALATE');
+    active?.systemRecommendation ||
+    (active?.risk === 'LOW' ? 'TRUST' : active?.risk === 'HIGH' ? 'VERIFY' : 'ESCALATE');
 
   const backendLabel = backendHealth?.model_loaded
     ? `${backendHealth.backend} · ${backendHealth.device}`
     : backendHealth?.status === 'offline'
       ? 'API offline'
       : 'Connecting…';
-
 
   return (
     <div className="app-root">
@@ -512,8 +436,7 @@ export default function App() {
               SignalShield <span className="brand-grad">AI</span>
             </h1>
             <p>
-              Detect synthetic mission audio, transcribe operational content, and combine both
-              signals into clear verification decisions.
+              Detect synthetic speech, acoustic duress, and operational content from uploaded or live audio.
             </p>
             <div className={`backend-pill ${backendHealth?.model_loaded ? 'online' : 'offline'}`}>
               <span className="backend-dot" />
@@ -541,9 +464,6 @@ export default function App() {
               {isRecording ? <Square size={16} /> : <Mic size={16} />}
               {isRecording ? `Stop · ${formatRecordingTime(recordingSeconds)}` : 'Record Live'}
             </Button>
-            <Button variant="outline" onClick={() => setActive(intercepts[1])} disabled={isBusy}>
-              <Sparkles size={16} /> Load Sample
-            </Button>
           </div>
         </header>
 
@@ -558,209 +478,166 @@ export default function App() {
           <aside className="sidebar-col">
             <Card>
               <div className="panel-title">
-                <Lock size={18} />
-                <h2>Mission Setup</h2>
+                <ShieldAlert size={18} />
+                <h2>Watchlist Keywords</h2>
               </div>
-              <label className="small-label">Profile</label>
-              <div className="stack">
-                {missionProfiles.map((profile) => (
-                  <button
-                    key={profile}
-                    onClick={() => setMission(profile)}
-                    className={`choice-btn ${mission === profile ? 'active-cyan' : ''}`}
-                  >
-                    {profile}
-                  </button>
-                ))}
-              </div>
-              <label className="small-label top-gap">Watched Assets</label>
+              <p className="small-note">
+                Optional comma-separated terms to flag in the transcript during analysis.
+              </p>
+              <label className="small-label top-gap">Keywords</label>
               <textarea
                 value={watchlist}
                 onChange={(e) => setWatchlist(e.target.value)}
-                rows={3}
+                rows={4}
+                placeholder="e.g. convoy, checkpoint, medevac"
                 className="watch-input"
               />
-            </Card>
-
-            <Card>
-              <div className="panel-title">
-                <Radio size={18} />
-                <h2>Sample Intercepts</h2>
-              </div>
-              <div className="stack">
-                {uploadResult && (
-                  <button
-                    onClick={() => setActive(uploadResult)}
-                    className={`choice-btn intercept ${active.id === uploadResult.id ? 'active-fuchsia' : ''}`}
-                  >
-                    <div>
-                      <div className="intercept-title">
-                        {uploadResult.source === 'record' ? 'Latest Recording' : 'Latest Upload'}
-                      </div>
-                      <div className="intercept-sub">{uploadResult.title}</div>
-                    </div>
-                    <FileAudio size={18} />
-                  </button>
-                )}
-                {intercepts.map((item) => (
-                  <button
-                    key={item.id}
-                    onClick={() => {
-                      setActive(item);
-                      setUploadError('');
-                    }}
-                    className={`choice-btn intercept ${active.id === item.id ? 'active-fuchsia' : ''}`}
-                  >
-                    <div>
-                      <div className="intercept-title">{item.title}</div>
-                      <div className="intercept-sub">{item.subtitle}</div>
-                    </div>
-                    <FileAudio size={18} />
-                  </button>
-                ))}
-              </div>
-              {uploadError && <p className="small-note upload-error">{uploadError}</p>}
             </Card>
           </aside>
 
           <section className="main-col">
-            <div className="metric-grid">
-              <MetricCard icon={ShieldAlert} label="Overall Risk" value={active.risk} sub="Authenticity + severity" />
-              <MetricCard
-                icon={Gauge}
-                label="Authenticity"
-                value={active.authenticity}
-                sub={`${authenticityScore}% confidence`}
-              />
-              <MetricCard
-                icon={BrainCircuit}
-                label="Category"
-                value={active.intent.split(' /')[0]}
-                sub="From transcript"
-              />
-              <MetricCard icon={Clock} label="Latency" value={`${active.latency} ms`} sub="Live inference" />
-            </div>
-
-            <Card className="analysis-card">
-              <div className="analysis-head">
-                <div>
-                  <div className="analysis-eyebrow">
-                    <AudioWaveform size={18} /> Audio + Transcript Analysis
-                  </div>
-                  <h2>{active.title}</h2>
-                  {hasPlayableAudio && (
-                    <AudioPlayer
-                      url={active.audioUrl}
-                      label={active.source === 'record' ? 'Play recording' : 'Play clip'}
-                    />
-                  )}
+            {!active ? (
+              <EmptyState />
+            ) : (
+              <>
+                <div className="metric-grid metric-grid-5">
+                  <MetricCard icon={ShieldAlert} label="Overall Risk" value={active.risk} sub="Authenticity + duress + severity" />
+                  <MetricCard
+                    icon={Gauge}
+                    label="Authenticity"
+                    value={active.authenticity}
+                    sub={`${authenticityScore}% confidence`}
+                  />
+                  <MetricCard
+                    icon={HeartPulse}
+                    label="Acoustic Duress"
+                    value={active.duressAvailable === false ? 'Unavailable' : active.duressLabel || 'Pending'}
+                    sub={
+                      active.duressAvailable === false
+                        ? active.duressError || 'Model not loaded'
+                        : `${duressScore ?? 0}% stress probability`
+                    }
+                  />
+                  <MetricCard
+                    icon={BrainCircuit}
+                    label="Category"
+                    value={active.intent.split(' /')[0]}
+                    sub="From transcript"
+                  />
+                  <MetricCard icon={Clock} label="Latency" value={`${active.latency} ms`} sub="Live inference" />
                 </div>
-                <RiskPill risk={active.risk} />
-              </div>
 
-              <div className="analysis-grid">
-                <div className="left-stack">
-                  {active.source === 'upload' || active.source === 'record' ? (
-                    <AcousticRationale explanation={active.explanation} />
-                  ) : (
-                    <Waveform chunks={active.chunks} illustrative />
-                  )}
-
-                  <div className="two-col">
-                    <div className="mini-card">
-                      <div className="mini-title">
-                        <Zap size={16} /> Authenticity Output
+                <Card className="analysis-card">
+                  <div className="analysis-head">
+                    <div>
+                      <div className="analysis-eyebrow">
+                        <AudioWaveform size={18} /> Analysis Results
                       </div>
-                      <div className="score-row">
-                        <div className="score-value">{fakeScore}%</div>
-                        <div className="score-meta">synthetic score</div>
-                      </div>
-                      <div className="progress-bg">
-                        <motion.div
-                          key={active.id}
-                          initial={{ width: 0 }}
-                          animate={{ width: `${fakeScore}%` }}
-                          className="progress-fill"
+                      <h2>{active.title}</h2>
+                      {active.audioUrl && (
+                        <AudioPlayer
+                          url={active.audioUrl}
+                          label={active.source === 'record' ? 'Play recording' : 'Play clip'}
                         />
+                      )}
+                    </div>
+                    <RiskPill risk={active.risk} />
+                  </div>
+
+                  <div className="analysis-grid">
+                    <div className="left-stack">
+                      <AcousticRationale explanation={active.explanation} />
+
+                      <div className="two-col">
+                        <div className="mini-card">
+                          <div className="mini-title">
+                            <Zap size={16} /> Authenticity
+                          </div>
+                          <div className="score-row">
+                            <div className="score-value">{fakeScore}%</div>
+                            <div className="score-meta">synthetic score</div>
+                          </div>
+                          <div className="progress-bg">
+                            <motion.div
+                              key={`${active.id}-spoof`}
+                              initial={{ width: 0 }}
+                              animate={{ width: `${fakeScore}%` }}
+                              className="progress-fill"
+                            />
+                          </div>
+                        </div>
+
+                        <div className={`mini-card ${active.isDuress ? 'duress-alert' : ''}`}>
+                          <div className="mini-title">
+                            <HeartPulse size={16} /> Acoustic Duress
+                          </div>
+                          {active.duressAvailable === false ? (
+                            <p className="small-note">
+                              {active.duressError || 'Duress model unavailable. Place temporal_bilstm_duress.pth in the project root.'}
+                            </p>
+                          ) : (
+                            <>
+                              <div className="score-row">
+                                <div className="score-value">{duressScore ?? 0}%</div>
+                                <div className="score-meta">{active.duressLabel || 'Pending analysis'}</div>
+                              </div>
+                              <div className="progress-bg">
+                                <motion.div
+                                  key={`${active.id}-duress`}
+                                  initial={{ width: 0 }}
+                                  animate={{ width: `${duressScore ?? 0}%` }}
+                                  className={`progress-fill ${active.isDuress ? 'progress-duress' : 'progress-calm'}`}
+                                />
+                              </div>
+                            </>
+                          )}
+                        </div>
                       </div>
                     </div>
 
-                    <div className="mini-card">
-                      <div className="mini-title">
-                        <BadgeCheck size={16} /> Decision Band
+                    <div className="right-stack">
+                      <div className="mini-card">
+                        <div className="label">Transcript</div>
+                        {parseWatchlistKeywords(watchlist).length > 0 &&
+                        !active.isTranscribing &&
+                        !active.transcript.startsWith('Transcription') ? (
+                          <HighlightedTranscript text={active.transcript} watchlist={watchlist} />
+                        ) : (
+                          <p className="quote">“{active.transcript}”</p>
+                        )}
+                        {active.isTranscribing && (
+                          <p className="small-note">Authenticity is ready. Transcription is still running.</p>
+                        )}
                       </div>
-                      <div className="decision-text">{systemRecommendation}</div>
-                      <p className="small-note">
-                        Generated from authenticity, intent, watchlist hits, and mission context.
-                      </p>
+
+                      {watchlist.trim() && (
+                        <div className="mini-card">
+                          <div className="label">Watchlist Matches</div>
+                          <div className="chips">
+                            {active.watch.length === 0 && (
+                              <span className="chip muted-chip">No matches in transcript</span>
+                            )}
+                            {active.watch.map((term) => (
+                              <span key={term} className="chip">
+                                {term}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="mini-card alert">
+                        <div className="mini-title">
+                          {active.risk === 'LOW' ? <ShieldCheck size={18} /> : <AlertTriangle size={18} />}
+                          Recommendation · {systemRecommendation}
+                        </div>
+                        <p className="small-note">{active.recommendation}</p>
+                      </div>
                     </div>
                   </div>
-                </div>
-
-                <div className="right-stack">
-                  <div className="mini-card">
-                    <div className="label">Transcript</div>
-                    <p className="quote">“{active.transcript}”</p>
-                    {active.isTranscribing && <p className="small-note">Authenticity is ready. Transcription is still running.</p>}
-                  </div>
-
-                  <div className="mini-card">
-                    <div className="label">Watchlist Matches</div>
-                    <div className="chips">
-                      {active.watch.length === 0 && <span className="chip muted-chip">No extracted matches</span>}
-                      {active.watch.map((term) => (
-                        <span key={term} className="chip">
-                          {term}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="mini-card alert">
-                    <div className="mini-title">
-                      {active.risk === 'LOW' ? <ShieldCheck size={18} /> : <AlertTriangle size={18} />}
-                      Recommended Action
-                    </div>
-                    <p className="small-note">{active.recommendation}</p>
-                  </div>
-
-                  <div className="mini-card">
-                    <div className="label">Decision Mode</div>
-                    <div className="action-grid">
-                      {operatorActions.map((action) => (
-                        <button
-                          key={action}
-                          onClick={() => setOperatorDecision(action)}
-                          className={`action-btn ${operatorDecision === action ? 'active-cyan' : ''}`}
-                        >
-                          {action}
-                        </button>
-                      ))}
-                    </div>
-                    <p className="small-note">
-                      System recommendation: <strong>{systemRecommendation}</strong>
-                    </p>
-                  </div>
-
-                  <div className="mini-card">
-                    <div className="label">Analysis Summary</div>
-                    <p className="small-note">
-                      In a <strong>{mission}</strong> context, this intercept is classified as{' '}
-                      <strong>{active.intent}</strong>. The system recommends{' '}
-                      <strong>
-                        {active.risk === 'LOW'
-                          ? 'logging the message'
-                          : active.risk === 'HIGH'
-                            ? 'verification before action'
-                            : 'immediate escalation'}
-                      </strong>{' '}
-                      based on authenticity confidence, transcript severity, and operational impact.
-                    </p>
-                    <p className="small-note">Operator selected: {operatorDecision.toUpperCase()}</p>
-                  </div>
-                </div>
-              </div>
-            </Card>
+                </Card>
+              </>
+            )}
           </section>
         </div>
       </main>

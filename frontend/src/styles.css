@@ -296,6 +296,10 @@ body {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
+.metric-grid.metric-grid-5 {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
 .metric-head {
   display: flex;
   align-items: center;
@@ -472,10 +476,15 @@ body {
 }
 
 .two-col,
+.three-col,
 .action-grid {
   display: grid;
   gap: 12px;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.three-col {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .mini-title {
@@ -517,6 +526,19 @@ body {
   background: linear-gradient(90deg, #67e8f9, #f0abfc, #fca5a5);
 }
 
+.progress-fill.progress-calm {
+  background: linear-gradient(90deg, #22d3ee, #34d399);
+}
+
+.progress-fill.progress-duress {
+  background: linear-gradient(90deg, #f97316, #ef4444, #dc2626);
+}
+
+.mini-card.duress-alert {
+  border-color: rgba(249, 115, 22, 0.35);
+  background: rgba(249, 115, 22, 0.08);
+}
+
 .decision-text {
   font-size: 1.9rem;
   font-weight: 900;
@@ -532,6 +554,11 @@ body {
   font-size: 1.1rem;
   color: #f1f5f9;
   line-height: 1.6;
+}
+
+.keyword-color {
+  color: #fbbf24;
+  font-weight: 700;
 }
 
 .chips {
@@ -631,6 +658,26 @@ body {
   color: #fecaca;
 }
 
+.empty-state {
+  display: grid;
+  justify-items: center;
+  text-align: center;
+  gap: 10px;
+  padding: 48px 24px;
+  color: #94a3b8;
+}
+
+.empty-state h2 {
+  margin: 0;
+  color: #f8fafc;
+}
+
+.empty-state p {
+  margin: 0;
+  max-width: 420px;
+  line-height: 1.6;
+}
+
 .audio-player {
   margin-top: 12px;
 }
@@ -676,6 +723,7 @@ body {
 
   .hero-actions,
   .two-col,
+  .three-col,
   .action-grid,
   .segment-grid,
   .metric-grid {

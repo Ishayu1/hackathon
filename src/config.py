@@ -20,3 +20,6 @@ DEMO_FEATURE_CACHE = RESULTS_DIR / "feature_cache_demo_mfcc.npz"
 DEFAULT_SPECTRA_DECISION = "argmax"
 
 PREPROCESS_MODES = ("deterministic", "random")
+
+DEFAULT_DURESS_MODEL = PROJECT_ROOT / "temporal_bilstm_duress.pth"
+DEFAULT_DURESS_THRESHOLD = 0.5

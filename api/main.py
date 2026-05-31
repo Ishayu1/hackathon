@@ -1,4 +1,4 @@
-"""FastAPI service for Spectra-AASIST3 deepfake detection."""
+"""FastAPI service for Spectra-AASIST3 deepfake detection and acoustic duress analysis."""
 
 from __future__ import annotations
 
@@ -20,11 +20,14 @@ sys.path.insert(0, str(ROOT))
 from src.audio_preprocess import decode_audio_bytes
 from src.config import (
     DEFAULT_DEMO_FAST_MODEL,
+    DEFAULT_DURESS_MODEL,
+    DEFAULT_DURESS_THRESHOLD,
     DEFAULT_FAST_MODEL,
     DEFAULT_FAST_PROFILE_PATH,
     DEFAULT_SPECTRA_DECISION,
     SAMPLE_RATE,
 )
+from src.duress_inference import get_duress_model, get_duress_model_status, predict_duress_from_bytes
 from src.fast_baseline import prepare_waveform_fast
 from src.fast_explain import FastFeatureProfiles, explain_fast_features
 from src.inference import initialize_inference_context, predict_one_from_bytes
@@ -50,6 +53,9 @@ _transcriber_vad_filter = os.getenv("TRANSCRIBER_VAD_FILTER", "0").strip().lower
     "true",
     "yes",
 }
+_duress_model_path = os.getenv("DURESS_MODEL_PATH", str(DEFAULT_DURESS_MODEL))
+_duress_threshold = float(os.getenv("DURESS_THRESHOLD", str(DEFAULT_DURESS_THRESHOLD)))
+_duress_enabled = os.getenv("DURESS_ENABLED", "1").strip().lower() not in {"0", "false", "no"}
 _cors_origins = os.getenv(
     "CORS_ORIGINS",
     "http://localhost:5173,http://127.0.0.1:5173",
@@ -100,6 +106,11 @@ def health():
         "transcriber_model_size": _transcriber_model_size,
         "transcriber_vad_filter": _transcriber_vad_filter,
         "transcriber_error": str(_transcriber_error) if _transcriber_error else None,
+        "duress_enabled": _duress_enabled,
+        "duress_model_path": _duress_model_path,
+        "duress_threshold": _duress_threshold,
+        "duress_loaded": get_duress_model_status()[0] if _duress_enabled else False,
+        "duress_error": get_duress_model_status()[1] if _duress_enabled else None,
     }
 
 
@@ -124,6 +135,14 @@ async def classify(
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Inference failed: {exc}") from exc
 
+    duress = None
+    if _duress_enabled:
+        duress = predict_duress_from_bytes(
+            data,
+            weights_path=_duress_model_path,
+            threshold=_duress_threshold,
+        )
+
     result = asdict(pred)
     result.update(
         {
@@ -140,6 +159,7 @@ async def classify(
         result["explanation"] = _build_fast_explanation(data, pred.label)
     else:
         result["explanation"] = None
+    result["duress"] = asdict(duress) if duress is not None else None
     return result
 
 
@@ -148,6 +168,7 @@ async def transcribe(
     file: UploadFile = File(...),
     custom_keywords: str = Form(""),
     deepfake_probability: float = Form(0.0),
+    duress_probability: float = Form(0.0),
 ):
     data = await file.read()
     if not data:
@@ -157,6 +178,7 @@ async def transcribe(
         file.filename,
         custom_keywords,
         deepfake_probability=deepfake_probability,
+        duress_probability=duress_probability,
     )
 
 
@@ -195,6 +217,11 @@ def _warm_models() -> None:
         _get_transcriber()
     except Exception:
         pass
+    if _duress_enabled:
+        try:
+            get_duress_model(_duress_model_path)
+        except Exception:
+            pass
 
 
 def _build_transcription_result(
@@ -203,13 +230,16 @@ def _build_transcription_result(
     custom_keywords: str,
     pred=None,
     deepfake_probability: float | None = None,
+    duress_probability: float | None = None,
 ):
     suffix = Path(filename or "audio.wav").suffix or ".wav"
     if deepfake_probability is None and pred is not None:
         deepfake_probability = float(pred.score_spoof if pred.is_spoof else 1.0 - pred.confidence)
     spoof_probability = min(1.0, max(0.0, float(deepfake_probability or 0.0)))
+    duress_prob = min(1.0, max(0.0, float(duress_probability or 0.0)))
     external_signals = {
         "deepfake_probability": spoof_probability,
+        "duress_probability": duress_prob,
     }
 
     try:
